@@ -6,8 +6,6 @@ from config import (
 )
 
 class UIButton:
-    _font = None
-
     def __init__(
         self,
         rect: pygame.Rect,
@@ -27,7 +25,11 @@ class UIButton:
         self.border_radius = border_radius
         self.is_hovered = False
         self.is_pressed = False
-        self._font = pygame.font.SysFont("Arial", font_size, bold=True)
+        self._fonts = {
+            font_size: pygame.font.SysFont("Arial", font_size, bold=True),
+            font_size - 2: pygame.font.SysFont("Arial", max(10, font_size - 2), bold=True),
+            font_size - 4: pygame.font.SysFont("Arial", max(9, font_size - 4), bold=True),
+        }
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if not self.is_enabled:
@@ -68,7 +70,16 @@ class UIButton:
         pygame.draw.rect(surface, bg, self.rect, border_radius=self.border_radius)
         pygame.draw.rect(surface, border_col, self.rect, width=1, border_radius=self.border_radius)
 
-        text_surf = self._font.render(self.text, True, txt_col)
+        # Pick font that fits inside button without overflow
+        target_font = self._fonts.get(self.font_size)
+        text_surf = target_font.render(self.text, True, txt_col)
+        if text_surf.get_width() > self.rect.width - 12:
+            target_font = self._fonts.get(self.font_size - 2, target_font)
+            text_surf = target_font.render(self.text, True, txt_col)
+        if text_surf.get_width() > self.rect.width - 12:
+            target_font = self._fonts.get(self.font_size - 4, target_font)
+            text_surf = target_font.render(self.text, True, txt_col)
+
         tx = self.rect.x + (self.rect.width - text_surf.get_width()) // 2
         ty = self.rect.y + (self.rect.height - text_surf.get_height()) // 2
         surface.blit(text_surf, (tx, ty))
@@ -80,37 +91,97 @@ class ModalDialog:
         title: str,
         message: str,
         buttons: List[Tuple[str, Callable[[], None], Tuple[int, int, int]]],
-        width: int = 560,
-        height: int = 280
+        width: int = 580,
+        height: int = 280,
+        layout: str = "auto"
     ):
         self.title = title
-        self.message = message
-        self.width = width
-        self.height = height
-        self.is_open = True
+        self.raw_message = message
+        self.title_font = pygame.font.SysFont("Arial", 20, bold=True)
+        self.body_font = pygame.font.SysFont("Arial", 15)
+
+        # Auto-wrap message text to fit within dialog width
+        max_msg_w = width - 60
+        self.formatted_lines = []
+        for raw_line in message.split("\n"):
+            if not raw_line.strip():
+                self.formatted_lines.append("")
+                continue
+            words = raw_line.split(" ")
+            curr_line = ""
+            for word in words:
+                test_line = f"{curr_line} {word}".strip()
+                if self.body_font.render(test_line, True, (0, 0, 0)).get_width() <= max_msg_w:
+                    curr_line = test_line
+                else:
+                    if curr_line:
+                        self.formatted_lines.append(curr_line)
+                    curr_line = word
+            if curr_line:
+                self.formatted_lines.append(curr_line)
+
+        # Decide layout: "list" (vertical stacked) or "row" (horizontal)
+        if layout == "auto":
+            is_list = len(buttons) > 2 or any(len(b[0]) > 14 for b in buttons)
+        else:
+            is_list = (layout == "list")
+
+        # Dynamically adjust height to guarantee zero overlap
+        header_h = 65
+        line_spacing = 22
+        body_h = len(self.formatted_lines) * line_spacing + 20
         
-        # Center in screen (1600x870)
-        self.x = (1600 - width) // 2
-        self.y = (870 - height) // 2
-        self.rect = pygame.Rect(self.x, self.y, width, height)
-
-        self.title_font = pygame.font.SysFont("Arial", 22, bold=True)
-        self.body_font = pygame.font.SysFont("Arial", 16)
-
-        # Create buttons
-        self.ui_buttons: List[UIButton] = []
-        btn_w = 140
         btn_h = 42
-        num_btns = len(buttons)
-        gap = 20
-        total_w = num_btns * btn_w + (num_btns - 1) * gap
-        start_bx = self.x + (width - total_w) // 2
-        by = self.y + height - btn_h - 25
+        if is_list:
+            buttons_h = len(buttons) * (btn_h + 10) + 10
+        else:
+            buttons_h = btn_h + 20
 
-        for i, (text, cb, color) in enumerate(buttons):
-            bx = start_bx + i * (btn_w + gap)
-            b = UIButton(pygame.Rect(bx, by, btn_w, btn_h), text, callback=cb, font_size=15, bg_color=color)
-            self.ui_buttons.append(b)
+        min_needed_h = header_h + body_h + buttons_h + 20
+        self.height = max(height, min_needed_h)
+        self.width = max(width, 540 if is_list else 480)
+
+        # Center in screen (1600x870)
+        self.x = (1600 - self.width) // 2
+        self.y = (870 - self.height) // 2
+        self.rect = pygame.Rect(self.x, self.y, self.width, self.height)
+        self.is_open = True
+
+        # Position buttons
+        self.ui_buttons: List[UIButton] = []
+        if is_list:
+            # Vertical stacked buttons
+            btn_w = self.width - 60
+            curr_by = self.y + header_h + body_h
+            for text, cb, color in buttons:
+                b = UIButton(
+                    pygame.Rect(self.x + 30, curr_by, btn_w, btn_h),
+                    text,
+                    callback=cb,
+                    font_size=15,
+                    bg_color=color
+                )
+                self.ui_buttons.append(b)
+                curr_by += btn_h + 10
+        else:
+            # Horizontal row
+            num_btns = len(buttons)
+            btn_w = min(180, (self.width - 60 - (num_btns - 1) * 16) // max(1, num_btns))
+            gap = 16
+            total_w = num_btns * btn_w + (num_btns - 1) * gap
+            start_bx = self.x + (self.width - total_w) // 2
+            by = self.y + self.height - btn_h - 22
+
+            for i, (text, cb, color) in enumerate(buttons):
+                bx = start_bx + i * (btn_w + gap)
+                b = UIButton(
+                    pygame.Rect(bx, by, btn_w, btn_h),
+                    text,
+                    callback=cb,
+                    font_size=15,
+                    bg_color=color
+                )
+                self.ui_buttons.append(b)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if not self.is_open:
@@ -120,7 +191,7 @@ class ModalDialog:
             if b.handle_event(event):
                 return True
 
-        # Block all clicks beneath modal
+        # Block background clicks
         if event.type in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP):
             return True
         return False
@@ -131,7 +202,7 @@ class ModalDialog:
 
         # Dimmer overlay
         overlay = pygame.Surface((1600, 870), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 160))
+        overlay.fill((0, 0, 0, 165))
         surface.blit(overlay, (0, 0))
 
         # Modal window background with shadow
@@ -143,21 +214,21 @@ class ModalDialog:
 
         # Title bar
         title_surf = self.title_font.render(self.title, True, (245, 245, 250))
-        surface.blit(title_surf, (self.x + 25, self.y + 25))
+        surface.blit(title_surf, (self.x + 25, self.y + 20))
 
         pygame.draw.line(
             surface, (60, 75, 90),
-            (self.x + 20, self.y + 60),
-            (self.x + self.width - 20, self.y + 60), 1
+            (self.x + 20, self.y + 54),
+            (self.x + self.width - 20, self.y + 54), 1
         )
 
         # Message lines
-        lines = self.message.split("\n")
-        my = self.y + 80
-        for line in lines:
-            line_surf = self.body_font.render(line, True, (215, 225, 235))
-            surface.blit(line_surf, (self.x + 25, my))
-            my += 24
+        my = self.y + 70
+        for line in self.formatted_lines:
+            if line:
+                line_surf = self.body_font.render(line, True, (215, 225, 235))
+                surface.blit(line_surf, (self.x + 30, my))
+            my += 22
 
         # Buttons
         for b in self.ui_buttons:

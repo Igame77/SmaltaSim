@@ -10,6 +10,7 @@ DIST_DIR = BASE_DIR / "dist"
 BUILD_DIR = BASE_DIR / "build"
 ASSETS_DIR = BASE_DIR / "assets"
 ICON_PATH = ASSETS_DIR / "logo.ico"
+ROOT_DIR = BASE_DIR.parent
 
 def clean():
     print("--- Очистка каталогов сборки ---")
@@ -20,8 +21,8 @@ def clean():
         spec.unlink(missing_ok=True)
 
 def build_exe():
-    print("--- Сборка исполняемого файла с помощью PyInstaller ---")
-    cmd = [
+    print("--- 1. Сборка onedir сборки для ZIP-архива ---")
+    cmd_onedir = [
         sys.executable,
         "-m", "PyInstaller",
         "--noconfirm",
@@ -32,16 +33,40 @@ def build_exe():
         "--add-data", f"{ASSETS_DIR};assets",
         str(BASE_DIR / "main.py")
     ]
-    print("Выполнение команды:", " ".join(cmd))
-    subprocess.run(cmd, cwd=str(BASE_DIR), check=True)
+    print("Выполнение команды:", " ".join(cmd_onedir))
+    subprocess.run(cmd_onedir, cwd=str(BASE_DIR), check=True)
+
+    print("--- 2. Сборка единого портативного EXE-файла (onefile) ---")
+    cmd_onefile = [
+        sys.executable,
+        "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--windowed",
+        "--onefile",
+        "--name", "SmaltaSimStandalone",
+        "--icon", str(ICON_PATH),
+        "--add-data", f"{ASSETS_DIR};assets",
+        str(BASE_DIR / "main.py")
+    ]
+    print("Выполнение команды:", " ".join(cmd_onefile))
+    subprocess.run(cmd_onefile, cwd=str(BASE_DIR), check=True)
+
+    onefile_exe = DIST_DIR / "SmaltaSimStandalone.exe"
+    target_root_exe = ROOT_DIR / "SmaltaSim.exe"
+    target_dist_exe = DIST_DIR / "SmaltaSim.exe"
+    if onefile_exe.exists():
+        shutil.copy2(onefile_exe, target_root_exe)
+        shutil.copy2(onefile_exe, target_dist_exe)
+        print(f"Автономный EXE скопирован в: {target_root_exe} ({target_root_exe.stat().st_size / (1024*1024):.2f} МБ)")
 
 def package_zip(version="v2.0.0"):
-    print("--- Создание релизного ZIP-архива для GitHub ---")
+    print("--- 3. Создание релизного ZIP-архива для GitHub ---")
     out_folder = DIST_DIR / "SmaltaSim"
     if not out_folder.exists():
         raise FileNotFoundError(f"Каталог сборки не найден: {out_folder}")
 
-    # Copy README, assets and run helper to distribution folder
+    # Copy README and assets to distribution folder
     shutil.copy2(BASE_DIR / "README.md", out_folder / "README.md")
     dest_assets = out_folder / "assets"
     if not dest_assets.exists():

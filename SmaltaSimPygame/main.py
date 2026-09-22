@@ -26,7 +26,11 @@ class SimulatorApp:
         pygame.init()
         pygame.font.init()
         pygame.display.set_caption("Vkm.ComplexSim - Комплексный симулятор устройств РЭБ")
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        
+        # Display with hardware scaling and resizable/fullscreen support
+        self.is_fullscreen = False
+        flags = pygame.SCALED | pygame.RESIZABLE
+        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
         self.clock = pygame.time.Clock()
 
         # Load Menu Background
@@ -38,6 +42,7 @@ class SimulatorApp:
         self.subtitle_font = pygame.font.SysFont("Arial", 18)
         self.nav_font = pygame.font.SysFont("Arial", 14, bold=True)
         self.badge_font = pygame.font.SysFont("Arial", 13, bold=True)
+        self.header_font = pygame.font.SysFont("Arial", 14, bold=True)
 
         # TrollFace Easter egg
         self.troll_face_img = pygame.image.load(str(Assets.TROLL_FACE)).convert_alpha()
@@ -64,7 +69,27 @@ class SimulatorApp:
             "rls": get_rls_algorithms(),
         }
 
+        # UI Elements
         self._build_main_menu_buttons()
+        self.btn_fullscreen = UIButton(
+            pygame.Rect(SCREEN_WIDTH - 170, 18, 145, 34),
+            "⛶ На весь экран",
+            callback=self.toggle_fullscreen,
+            font_size=13,
+            bg_color=(45, 60, 75)
+        )
+        self.btn_sim_fullscreen = UIButton(
+            pygame.Rect(SCREEN_WIDTH - 60, 4, 46, 28),
+            "⛶",
+            callback=self.toggle_fullscreen,
+            font_size=16,
+            bg_color=(40, 52, 65)
+        )
+
+    def toggle_fullscreen(self):
+        self.is_fullscreen = not self.is_fullscreen
+        pygame.display.toggle_fullscreen()
+        self.btn_fullscreen.text = "🗗 В окно" if self.is_fullscreen else "⛶ На весь экран"
 
     def _build_main_menu_buttons(self):
         btn_w, btn_h = 240, 52
@@ -105,25 +130,26 @@ class SimulatorApp:
 
     def _show_info_dialog(self):
         msg = (
-            "Vkm.ComplexSim — Комплексный симулятор устройств РЭБ\n\n"
+            "Vkm.ComplexSim — Комплексный симулятор устройств РЭБ и РЛС\n\n"
             "Программа предназначена для обучения и проверки знаний курсантов\n"
             "по приборам и комплексам радиоэлектронной борьбы и радиолокации:\n"
-            "  * Станция РЭБ ЛО01 'Смальта' (блоки П, Р, И, К)\n"
-            "  * Импульсная РЛС ОНЦ (пульт имитатора, генератор Г5-15, осциллограф С1-65)\n\n"
-            "В режиме 'Обучение' доступна интерактивная подсказка к каждому шагу.\n"
-            "В режиме 'Экзамен' оценивается точность и порядок выполнения действий."
+            "  * Станция активных помех ЛО01 'Смальта' (блоки П, Р, И, К)\n"
+            "  * Импульсная РЛС ОНЦ (пульты управления, круговой радар, генератор Г5-15, осциллограф С1-65)\n\n"
+            "В режиме 'Обучение' доступна интерактивная пошаговая инструкция с динамической подсветкой.\n"
+            "В режиме 'Экзамен' оценивается полнота и правильный порядок действий по формуле кафедры.\n"
+            "Горячие клавиши: F11 / Alt+Enter — полноэкранный режим, Пробел — следующий шаг в инфо-подсказках."
         )
         self.active_dialog = ModalDialog(
             "О программе",
             msg,
             [("Закрыть", lambda: setattr(self, 'active_dialog', None), (60, 75, 90))],
-            width=650,
-            height=340
+            width=700,
+            height=380,
+            layout="row"
         )
 
     def _open_device_selection(self, mode: ApplicationMode):
         self.mode = mode
-        # Dialog choosing which device to launch
         def choose(dev_key: str):
             self.active_dialog = None
             self._open_algorithm_selection(dev_key)
@@ -131,14 +157,15 @@ class SimulatorApp:
         buttons = [
             ("ЛО01 Смальта", lambda: choose("smalta"), (35, 110, 160)),
             ("РЛС ОНЦ", lambda: choose("rls"), (30, 130, 90)),
-            ("Отмена", lambda: setattr(self, 'active_dialog', None), (70, 75, 80)),
+            ("Отмена", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)),
         ]
         self.active_dialog = ModalDialog(
             f"Выбор изделия ({mode.value})",
             "Выберите станцию или приборный комплекс для работы:",
             buttons,
-            width=580,
-            height=240
+            width=620,
+            height=250,
+            layout="row"
         )
 
     def _open_algorithm_selection(self, dev_key: str):
@@ -155,15 +182,16 @@ class SimulatorApp:
 
         buttons = []
         for a in algos:
-            buttons.append((a.name, lambda alg=a: choose_algo(alg), (45, 75, 105)))
-        buttons.append(("Отмена", lambda: setattr(self, 'active_dialog', None), (70, 75, 80)))
+            buttons.append((a.name, lambda alg=a: choose_algo(alg), (40, 85, 125)))
+        buttons.append(("Отмена", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)))
 
         self.active_dialog = ModalDialog(
-            f"Выбор алгоритма работы",
+            "Выбор алгоритма работы",
             f"Изделие: {device.readable_name}\nВыберите требуемое учебное задание:",
             buttons,
-            width=640,
-            height=280
+            width=700,
+            height=360,
+            layout="list"
         )
 
     def start_simulation(self, device: DeviceBase, algorithm):
@@ -188,7 +216,7 @@ class SimulatorApp:
 
         # Prev button
         self.btn_prev = UIButton(
-            pygame.Rect(40, ny, 260, bh),
+            pygame.Rect(30, ny, 250, bh),
             "<- Предыдущий блок",
             callback=self._on_prev_page,
             font_size=14
@@ -205,7 +233,7 @@ class SimulatorApp:
 
         # Next button
         self.btn_next = UIButton(
-            pygame.Rect(SCREEN_WIDTH - 300, ny, 260, bh),
+            pygame.Rect(SCREEN_WIDTH - 280, ny, 250, bh),
             "Следующий блок ->",
             callback=self._on_next_page,
             font_size=14
@@ -252,15 +280,16 @@ class SimulatorApp:
             self._show_exam_results()
 
         buttons = [
-            ("Да, завершить", submit, (180, 50, 45)),
-            ("Отмена", lambda: setattr(self, 'active_dialog', None), (70, 75, 80)),
+            ("Да, завершить", submit, (160, 50, 45)),
+            ("Отмена", lambda: setattr(self, 'active_dialog', None), (70, 75, 80))
         ]
         self.active_dialog = ModalDialog(
             "Завершение экзамена",
             "Вы уверены, что хотите завершить экзамен?\nВаш результат будет рассчитан и сохранен.",
             buttons,
-            width=500,
-            height=220
+            width=540,
+            height=240,
+            layout="row"
         )
 
     def _show_exam_results(self):
@@ -300,9 +329,9 @@ class SimulatorApp:
 
         buttons = [
             ("Повторить", retry, (45, 110, 160)),
-            ("В меню", exit_to_menu, (70, 80, 90)),
+            ("В главное меню", exit_to_menu, (70, 80, 90)),
         ]
-        self.active_dialog = ModalDialog(title, details_str, buttons, width=540, height=270)
+        self.active_dialog = ModalDialog(title, details_str, buttons, width=560, height=280, layout="row")
 
     def _check_cheat_code(self, key):
         if self.mode != ApplicationMode.EXAMINE or self.is_god_mode:
@@ -325,9 +354,15 @@ class SimulatorApp:
                 if event.type == pygame.QUIT:
                     self.quit()
 
-                # Cheat key listener
+                # Fullscreen hotkeys: F11 or Alt+Enter
                 if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_F11 or (event.key == pygame.K_RETURN and (event.mod & pygame.KMOD_ALT)):
+                        self.toggle_fullscreen()
+                        continue
+
+                    # Cheat key listener
                     self._check_cheat_code(event.key)
+                    
                     # Space advances INFO step in training
                     if event.key == pygame.K_SPACE and self.active_device and self.active_device.hint_service:
                         curr_action = self.active_device.hint_service.get_current_action()
@@ -341,11 +376,13 @@ class SimulatorApp:
 
                 # Main Menu events
                 if self.state == AppState.MAIN_MENU:
+                    self.btn_fullscreen.handle_event(event)
                     for b in self.menu_buttons:
                         b.handle_event(event)
 
                 # Simulation events
                 elif self.state == AppState.SIMULATION:
+                    self.btn_sim_fullscreen.handle_event(event)
                     # Navbar buttons
                     if self.btn_prev.handle_event(event):
                         continue
@@ -383,8 +420,9 @@ class SimulatorApp:
                         "Обучение завершено!",
                         "Поздравляем! Вы успешно выполнили все шаги алгоритма.\nХотите проверить свои знания в режиме 'Экзамен'?",
                         [("На экзамен", to_exam, (170, 95, 30)), ("В главное меню", to_menu, (60, 75, 90))],
-                        width=560,
-                        height=240
+                        width=580,
+                        height=250,
+                        layout="row"
                     )
 
             # Draw
@@ -423,16 +461,40 @@ class SimulatorApp:
         for b in self.menu_buttons:
             b.draw(self.screen)
 
+        # Fullscreen button in menu
+        self.btn_fullscreen.draw(self.screen)
+
     def draw_simulation(self):
         # 1. Draw active device canvas (0..800)
         if self.active_device:
             self.active_device.draw(self.screen)
 
-        # 2. Draw Training Hints Overlay
+        # 2. Sleek Top Status Ribbon (Semi-transparent overlay at Y=0..36, leaves station visible)
+        if self.active_device:
+            top_bar = pygame.Surface((SCREEN_WIDTH, 36), pygame.SRCALPHA)
+            top_bar.fill((12, 18, 24, 200))
+            pygame.draw.line(top_bar, (40, 52, 65), (0, 35), (SCREEN_WIDTH, 35), 1)
+            self.screen.blit(top_bar, (0, 0))
+
+            # Device and current algorithm info
+            algo_name = self.active_device.current_algorithm.name if self.active_device.current_algorithm else ""
+            dev_str = f"Станция: {self.active_device.readable_name}   |   Задание: {algo_name}"
+            info_surf = self.header_font.render(dev_str, True, (225, 235, 245))
+            self.screen.blit(info_surf, (20, 8))
+
+            # Mode badge
+            mode_color = COLOR_SUCCESS if self.mode == ApplicationMode.TRAINING else COLOR_WARNING
+            badge_surf = self.badge_font.render(f"[ {self.mode.value.upper()} ]", True, mode_color)
+            self.screen.blit(badge_surf, (SCREEN_WIDTH - 210, 9))
+
+            # Fullscreen button in simulation
+            self.btn_sim_fullscreen.draw(self.screen)
+
+        # 3. Draw Training Hints Overlay
         if self.mode == ApplicationMode.TRAINING and self.active_device:
             self.hint_renderer.draw(self.screen, self.active_device)
 
-        # 3. Draw Bottom Navbar (800..870)
+        # 4. Draw Bottom Navbar (800..870)
         nav_rect = pygame.Rect(0, CANVAS_HEIGHT, SCREEN_WIDTH, NAVBAR_HEIGHT)
         pygame.draw.rect(self.screen, COLOR_NAVBAR, nav_rect)
         pygame.draw.line(self.screen, COLOR_NAVBAR_BORDER, (0, CANVAS_HEIGHT), (SCREEN_WIDTH, CANVAS_HEIGHT), 2)
@@ -442,18 +504,20 @@ class SimulatorApp:
         self.btn_finish.draw(self.screen)
         self.btn_next.draw(self.screen)
 
-        # Title info above/around buttons
+        # Current page name indicator in center of navbar
         if self.active_device:
-            dev_str = f"{self.active_device.readable_name} | {self.active_device.current_algorithm.name if self.active_device.current_algorithm else ''}"
-            info_surf = self.nav_font.render(dev_str, True, (220, 230, 240))
-            self.screen.blit(info_surf, (40, CANVAS_HEIGHT - 32))
+            curr_pg = self.active_device.current_page_key
+            pg_title = curr_pg.value if hasattr(curr_pg, 'value') else str(curr_pg)
+            total_pgs = len(self.active_device.pages)
+            curr_pg_idx = self.active_device.pages.index(curr_pg) + 1
+            pg_label = f"Панель {curr_pg_idx}/{total_pgs}: {pg_title}"
+            pg_surf = self.nav_font.render(pg_label, True, (160, 180, 200))
+            # Position above finish button or centered in navbar
+            px = (SCREEN_WIDTH - pg_surf.get_width()) // 2
+            py = CANVAS_HEIGHT + 3
+            self.screen.blit(pg_surf, (px, py))
 
-            # Mode badge
-            mode_color = COLOR_SUCCESS if self.mode == ApplicationMode.TRAINING else COLOR_WARNING
-            badge_surf = self.badge_font.render(f"РЕЖИМ: {self.mode.value.upper()}", True, mode_color)
-            self.screen.blit(badge_surf, (SCREEN_WIDTH - badge_surf.get_width() - 40, CANVAS_HEIGHT - 32))
-
-        # 4. TrollFace easter egg popup
+        # 5. TrollFace easter egg popup
         if pygame.time.get_ticks() < self.show_troll_until_ms:
             tx = (SCREEN_WIDTH - 120) // 2
             ty = CANVAS_HEIGHT - 130

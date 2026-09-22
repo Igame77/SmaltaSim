@@ -34,8 +34,22 @@ class DeviceBase:
         raw = pygame.image.load(str(image_path))
         if pygame.display.get_surface() is not None:
             raw = raw.convert()
-        scaled = pygame.transform.smoothscale(raw, (CANVAS_WIDTH, CANVAS_HEIGHT))
-        self.page_backgrounds[page_key] = scaled
+        
+        # Proportional uniform scaling (WPF Stretch="Uniform") to fit CANVAS_WIDTH x CANVAS_HEIGHT
+        orig_w, orig_h = raw.get_size()
+        scale = min(CANVAS_WIDTH / orig_w, CANVAS_HEIGHT / orig_h)
+        scaled_w = int(round(orig_w * scale))
+        scaled_h = int(round(orig_h * scale))
+        scaled_img = pygame.transform.smoothscale(raw, (scaled_w, scaled_h))
+
+        # Center on 1600x800 canvas with dark station chassis background
+        canvas_bg = pygame.Surface((CANVAS_WIDTH, CANVAS_HEIGHT))
+        canvas_bg.fill((20, 24, 28))
+        offset_x = (CANVAS_WIDTH - scaled_w) // 2
+        offset_y = (CANVAS_HEIGHT - scaled_h) // 2
+        canvas_bg.blit(scaled_img, (offset_x, offset_y))
+        
+        self.page_backgrounds[page_key] = canvas_bg
 
     def can_go_forward(self) -> bool:
         idx = self.pages.index(self.current_page_key)

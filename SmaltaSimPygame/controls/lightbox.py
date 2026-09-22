@@ -1,9 +1,9 @@
 import pygame
-from typing import Any, Tuple, Optional
+from typing import Any, Tuple, Optional, Dict
 from core.element_base import ElementBase
 
 class Lightbox(ElementBase):
-    _font: Optional[pygame.font.Font] = None
+    _fonts: Dict[int, pygame.font.Font] = {}
 
     def __init__(
         self,
@@ -26,13 +26,13 @@ class Lightbox(ElementBase):
         )
         self.text = text
         self.bg_color = bg_color
-        self._init_font()
+        self._init_fonts()
 
     @classmethod
-    def _init_font(cls):
-        if cls._font is None:
-            # Clean legible sans-serif font for small tactical placards
-            cls._font = pygame.font.SysFont("Arial", 9, bold=True)
+    def _init_fonts(cls):
+        if not cls._fonts:
+            for sz in [8, 9, 10]:
+                cls._fonts[sz] = pygame.font.SysFont("Arial", sz, bold=True)
 
     def on_value_changed(self):
         super().on_value_changed()
@@ -61,15 +61,29 @@ class Lightbox(ElementBase):
             pygame.draw.rect(box_surf, border_color, (0, 0, self.width, self.height), width=1, border_radius=3)
 
         # Draw centered multiline text
-        lines = self.text.split("\n")
-        total_text_h = len(lines) * 11
-        start_y = (self.height - total_text_h) // 2
+        lines = [line.strip() for line in self.text.split("\n") if line.strip()]
+        if not lines:
+            surface.blit(box_surf, (self.pos_left, self.pos_top))
+            return
 
-        text_color = (10, 20, 10) if self.value == 1 else (170, 185, 175)
-        for i, line in enumerate(lines):
-            line_surf = self._font.render(line, True, text_color)
-            line_x = (self.width - line_surf.get_width()) // 2
-            line_y = start_y + i * 11
-            box_surf.blit(line_surf, (line_x, line_y))
+        # Choose best font size to avoid any overflow
+        font_sz = 8 if len(lines) > 1 else 9
+        font = self._fonts.get(font_sz) or pygame.font.SysFont("Arial", font_sz, bold=True)
+        
+        # Verify text fits width, scale down to 7 if any line exceeds 68px
+        max_w = max(font.render(l, True, (0, 0, 0)).get_width() for l in lines)
+        if max_w > self.width - 6:
+            font = self._fonts.get(7) or pygame.font.SysFont("Arial", 7, bold=True)
+
+        text_color = (10, 25, 10) if self.value == 1 else (170, 185, 175)
+        rendered_surfs = [font.render(l, True, text_color) for l in lines]
+        
+        total_text_h = sum(s.get_height() for s in rendered_surfs) + (len(rendered_surfs) - 1) * 1
+        curr_y = max(1, (self.height - total_text_h) // 2)
+        
+        for s in rendered_surfs:
+            line_x = (self.width - s.get_width()) // 2
+            box_surf.blit(s, (line_x, curr_y))
+            curr_y += s.get_height() + 1
 
         surface.blit(box_surf, (self.pos_left, self.pos_top))
