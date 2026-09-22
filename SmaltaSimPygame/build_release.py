@@ -35,7 +35,7 @@ def build_exe():
     print("Выполнение команды:", " ".join(cmd))
     subprocess.run(cmd, cwd=str(BASE_DIR), check=True)
 
-def package_zip(version="v1.0.0"):
+def package_zip(version="v2.0.0"):
     print("--- Создание релизного ZIP-архива для GitHub ---")
     out_folder = DIST_DIR / "SmaltaSim"
     if not out_folder.exists():
