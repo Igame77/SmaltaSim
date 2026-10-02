@@ -60,7 +60,7 @@ def build_exe():
         shutil.copy2(onefile_exe, target_dist_exe)
         print(f"Автономный EXE скопирован в: {target_root_exe} ({target_root_exe.stat().st_size / (1024*1024):.2f} МБ)")
 
-def package_zip(version="v2.0.0"):
+def package_zip(version="v2.1.0"):
     print("--- 3. Создание релизного ZIP-архива для GitHub ---")
     out_folder = DIST_DIR / "SmaltaSim"
     if not out_folder.exists():
@@ -86,5 +86,5 @@ def package_zip(version="v2.0.0"):
 if __name__ == "__main__":
     clean()
     build_exe()
-    package_zip()
+    package_zip("v2.1.0")
     print("--- Сборка успешно завершена! ---")

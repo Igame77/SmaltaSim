@@ -123,16 +123,74 @@ def create_rls_device() -> DeviceBase:
 
 def get_rls_algorithms() -> List[Algorithm]:
     actions = [
-        Action(ActionName.CLICK, "cps_wheel_signal_noise", "Путем поворота колесика мыши добейтесь устойчивого появления цели на экране индикатора", expected_value=50),
-        Action(ActionName.INFO, "radar_target_1", "Как можно заметить, цель отчетливо видно на индикаторе"),
-        Action(ActionName.CLICK, "cps_stepwheel_noisetype", "Осуществим подавление цели: переключите вид помех на 'Прямошумовая помеха' (положение 3)", expected_value=3),
-        Action(ActionName.CLICK, "cps_stepwheel_generator_mode", "Переключите режим работы станции РЛС в положение 'Работа' (положение 2)", expected_value=2),
-        Action(ActionName.CLICK, "station_thumbler_speed", "Переключите режим работы РЛС в положение 'Медленно' (1)", expected_value=1),
-        Action(ActionName.CLICK, "cps_wheel_noise", "Прокрутите колесо для максимального увеличения помехового сигнала (значение 50)", expected_value=50),
-        Action(ActionName.INFO, "radar_target_1", "Как можно видеть, цель полностью засвечена помехой"),
-        Action(ActionName.CLICK, "cps_stepwheel_generator_mode", "Поставьте режим работы станции в положение 'Измерение' (0)", expected_value=0),
-        Action(ActionName.CLICK, "cps_stepwheel_noisetype", "Переключите вид поставляемой помехи на 'ЧМШ' (1)", expected_value=1),
-        Action(ActionName.CLICK, "c165_thumbler_scanmode_X", "Выключите развертку осциллографа, переведя переключатель в положение 'X'", expected_value=1),
+        Action(
+            ActionName.CLICK, "cps_wheel_signal_noise",
+            hint_text="Путем поворота колесика мыши добейтесь устойчивого появления цели на экране индикатора",
+            expected_value=50,
+            hint_indirect="Настройте чувствительность РЛС для уверенного обнаружения воздушной цели",
+            hint_clarify="Центральный пульт РЛС: регулировкой 'СИГНАЛ/ШУМ' добейтесь устойчивой отметки цели"
+        ),
+        Action(
+            ActionName.INFO, "radar_target_1",
+            hint_text="Как можно заметить, цель отчетливо видно на индикаторе (нажмите Пробел)",
+            hint_indirect="Убедитесь в визуальном обнаружении цели на круговом индикаторе",
+            hint_clarify="Экран кругового обзора: зафиксируйте яркую эхо-отметку цели на шкале дальности"
+        ),
+        Action(
+            ActionName.CLICK, "cps_stepwheel_noisetype",
+            hint_text="Осуществим подавление цели: переключите вид помех на 'Прямошумовая помеха' (положение 3)",
+            expected_value=3,
+            hint_indirect="Подготовьте активные помехи: выберите вид прямошумового подавления",
+            hint_clarify="Пульт РЛС: переключателем вида помех выберите 'Прямошумовая помеха' (положение 3)"
+        ),
+        Action(
+            ActionName.CLICK, "cps_stepwheel_generator_mode",
+            hint_text="Переключите режим работы станции РЛС в положение 'Работа' (положение 2)",
+            expected_value=2,
+            hint_indirect="Активируйте аппаратуру подавления: переведите станцию в рабочий режим",
+            hint_clarify="Пульт РЛС: установите переключатель режима станции в положение 'Работа' (положение 2)"
+        ),
+        Action(
+            ActionName.CLICK, "station_thumbler_speed",
+            hint_text="Переключите режим работы РЛС в положение 'Медленно' (1)",
+            expected_value=1,
+            hint_indirect="Снизьте скорость обзора антенны для прецизионного анализа спектра цели",
+            hint_clarify="Панель станции: переведите тумблер скорости антенны в положение 'Медленно' (1)"
+        ),
+        Action(
+            ActionName.CLICK, "cps_wheel_noise",
+            hint_text="Прокрутите колесо для максимального увеличения помехового сигнала (значение 50)",
+            expected_value=50,
+            hint_indirect="Выведите мощность излучаемой помехи на предельный уровень",
+            hint_clarify="Центральный пульт: вращением колеса 'Уровень помехи' установите максимальное значение (50)"
+        ),
+        Action(
+            ActionName.INFO, "radar_target_1",
+            hint_text="Как можно видеть, цель полностью засвечена помехой (нажмите Пробел)",
+            hint_indirect="Оцените качество радиоэлектронного прикрытия цели на экране индикатора",
+            hint_clarify="Экран индикатора: убедитесь, что отметка цели полностью замаскирована помеховой засветкой"
+        ),
+        Action(
+            ActionName.CLICK, "cps_stepwheel_generator_mode",
+            hint_text="Поставьте режим работы станции в положение 'Измерение' (0)",
+            expected_value=0,
+            hint_indirect="Переведите генераторный комплекс в режим измерений и контроля параметров",
+            hint_clarify="Пульт РЛС: переведите переключатель режима станции в положение 'Измерение' (положение 0)"
+        ),
+        Action(
+            ActionName.CLICK, "cps_stepwheel_noisetype",
+            hint_text="Переключите вид поставляемой помехи на 'ЧМШ' (1)",
+            expected_value=1,
+            hint_indirect="Смените структуру помехи на частотно-модулированный шум",
+            hint_clarify="Пульт РЛС: переключателем вида помех установите положение 'ЧМШ' (положение 1)"
+        ),
+        Action(
+            ActionName.CLICK, "c165_thumbler_scanmode_X",
+            hint_text="Выключите развертку осциллографа, переведя переключатель в положение 'X'",
+            expected_value=1,
+            hint_indirect="Переведите измерительный осциллограф С1-65 на внешнюю развёртку X",
+            hint_clarify="Панель осциллографа С1-65: переведите переключатель развёртки в положение 'X'"
+        ),
     ]
     algo = Algorithm("Снятие зависимости коэффициента подавления от длительности импульсов в пачке", {}, {}, actions)
     return [algo]

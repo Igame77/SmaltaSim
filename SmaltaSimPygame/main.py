@@ -135,16 +135,18 @@ class SimulatorApp:
             "по приборам и комплексам радиоэлектронной борьбы и радиолокации:\n"
             "  * Станция активных помех ЛО01 'Смальта' (блоки П, Р, И, К)\n"
             "  * Импульсная РЛС ОНЦ (пульты управления, круговой радар, генератор Г5-15, осциллограф С1-65)\n\n"
-            "В режиме 'Обучение' доступна интерактивная пошаговая инструкция с динамической подсветкой.\n"
-            "В режиме 'Экзамен' оценивается полнота и правильный порядок действий по формуле кафедры.\n"
-            "Горячие клавиши: F11 / Alt+Enter — полноэкранный режим, Пробел — следующий шаг в инфо-подсказках."
+            "В режиме 'Обучение' работает адаптивная 3-уровневая система подсказок:\n"
+            "  1) Общая задача/цель действия без прямой подсказки\n"
+            "  2) При неверном действии подсказка уточняется (блок/тип органа)\n"
+            "  3) Если действие вызывает затруднения — переход к прямой подсветке и указанию стрелкой.\n"
+            "Горячие клавиши: F1 — уточнить подсказку, Пробел — следующий шаг в инфо-подсказках, F11 — полный экран."
         )
         self.active_dialog = ModalDialog(
             "О программе",
             msg,
             [("Закрыть", lambda: setattr(self, 'active_dialog', None), (60, 75, 90))],
-            width=700,
-            height=380,
+            width=720,
+            height=410,
             layout="row"
         )
 
@@ -362,6 +364,11 @@ class SimulatorApp:
 
                     # Cheat key listener
                     self._check_cheat_code(event.key)
+
+                    # F1 or H escalates hint level in training mode
+                    if event.key in (pygame.K_F1, pygame.K_h) and self.active_device and self.active_device.hint_service:
+                        if self.mode == ApplicationMode.TRAINING:
+                            self.active_device.hint_service.escalate_hint()
                     
                     # Space advances INFO step in training
                     if event.key == pygame.K_SPACE and self.active_device and self.active_device.hint_service:
@@ -383,6 +390,12 @@ class SimulatorApp:
                 # Simulation events
                 elif self.state == AppState.SIMULATION:
                     self.btn_sim_fullscreen.handle_event(event)
+
+                    # Training Hint HUD interactive elements (e.g. Help button click / hover)
+                    if self.mode == ApplicationMode.TRAINING and self.active_device:
+                        if self.hint_renderer.handle_event(event, self.active_device):
+                            continue
+
                     # Navbar buttons
                     if self.btn_prev.handle_event(event):
                         continue

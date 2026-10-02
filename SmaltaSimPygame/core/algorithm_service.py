@@ -13,14 +13,18 @@ class Action:
         parent_element_name: str,
         hint_text: str = "",
         expected_value: Optional[int] = None,
-        use_in_examine_check: bool = True
+        use_in_examine_check: bool = True,
+        hint_indirect: str = "",
+        hint_clarify: str = ""
     ):
         self.name = name
         self.parent_element_name = parent_element_name
-        self.hint_text = hint_text
+        self.hint_text = hint_text  # Level 3: direct hint (старая прямая подсказка)
         self.expected_value = expected_value
         self.use_in_examine_check = use_in_examine_check
         self.is_completed = False
+        self.hint_indirect = hint_indirect or hint_text  # Level 1: "запустите систему..."
+        self.hint_clarify = hint_clarify or hint_text    # Level 2: уточняющая подсказка
 
 class Algorithm:
     def __init__(
@@ -111,47 +115,92 @@ class HintService:
         self.current_action_index = -1
         self.device = None
         self.is_training_complete = False
+        self.hint_level: int = 1
+        self.mistakes_on_step: int = 0
+        self.total_training_mistakes: int = 0
+        self.last_mistake_text: str = ""
+        self.mistake_flash_until_ms: int = 0
 
     def start_training(self, algorithm: Algorithm, device: Any):
         self.algorithm = algorithm
         self.device = device
         self.current_action_index = 0
         self.is_training_complete = False
+        self.hint_level = 1
+        self.mistakes_on_step = 0
+        self.total_training_mistakes = 0
+        self.last_mistake_text = ""
+        self.mistake_flash_until_ms = 0
 
-        # Disable all elements first
+        # Enable all elements for exploratory training
         for el in self.device.elements:
-            el.is_enabled = False
+            el.is_enabled = True
             el.is_hint_open = False
 
         self._apply_current_hint()
 
     def get_current_action(self) -> Optional[Action]:
-        if not self.algorithm or self.current_action_index >= len(self.algorithm.actions):
+        if not self.algorithm or self.current_action_index < 0 or self.current_action_index >= len(self.algorithm.actions):
             return None
         return self.algorithm.actions[self.current_action_index]
 
-    def _apply_current_hint(self):
+    def get_current_hint_text(self) -> str:
         action = self.get_current_action()
         if not action:
-            self.is_training_complete = True
-            return
+            return ""
+        if self.hint_level == 1:
+            return action.hint_indirect
+        elif self.hint_level == 2:
+            return action.hint_clarify
+        else:
+            return action.hint_text
 
-        target = self.device.get_element_by_name(action.parent_element_name)
-        if target:
-            target.is_enabled = True
-            target.is_hint_open = True
-            target.hint_text = action.hint_text
+    def get_hint_level_badge(self) -> str:
+        if self.hint_level == 1:
+            return "УРОВЕНЬ 1: ЗАДАЧА"
+        elif self.hint_level == 2:
+            return "УРОВЕНЬ 2: УТОЧНЕНИЕ"
+        else:
+            return "УРОВЕНЬ 3: ПРЯМОЕ УКАЗАНИЕ"
+
+    def escalate_hint(self) -> bool:
+        """Manually escalate hint level when stuck ('не доходит' or F1 pressed)."""
+        if self.hint_level < 3:
+            self.hint_level += 1
+            self._apply_current_hint()
+            return True
+        return False
 
     def on_element_interacted(self, element_name: str, new_value: int):
         action = self.get_current_action()
-        if not action or action.parent_element_name != element_name:
+        if not action:
             return
 
-        if action.name == ActionName.CLICK:
-            if action.expected_value is None or action.expected_value == new_value:
-                self.advance()
-        elif action.name == ActionName.INFO:
+        is_target = (action.parent_element_name == element_name)
+        is_expected_val = (action.expected_value is None or action.expected_value == new_value)
+
+        if is_target and is_expected_val:
             self.advance()
+        else:
+            # User answered incorrectly: escalate hint level
+            self.on_mistake(element_name, new_value)
+
+    def on_mistake(self, element_name: str, new_value: int):
+        self.mistakes_on_step += 1
+        self.total_training_mistakes += 1
+        import pygame
+        self.mistake_flash_until_ms = pygame.time.get_ticks() + 3500
+
+        if self.hint_level == 1:
+            self.hint_level = 2
+            self.last_mistake_text = "Не тот орган управления! Подсказка уточнена:"
+        elif self.hint_level == 2:
+            self.hint_level = 3
+            self.last_mistake_text = "Неверно! Включено прямое указание на орган управления:"
+        else:
+            self.last_mistake_text = "Внимание: следуйте указанию стрелки и подсветки:"
+
+        self._apply_current_hint()
 
     def on_idle_completed(self, element_name: str, new_value: int):
         action = self.get_current_action()
@@ -168,18 +217,41 @@ class HintService:
             target = self.device.get_element_by_name(action.parent_element_name)
             if target:
                 target.is_hint_open = False
-                target.is_enabled = False
 
         self.current_action_index += 1
+        self.hint_level = 1
+        self.mistakes_on_step = 0
+        self.last_mistake_text = ""
+        self.mistake_flash_until_ms = 0
+
         if self.current_action_index >= len(self.algorithm.actions):
             self.is_training_complete = True
-            # Re-enable elements
             for el in self.device.elements:
                 el.is_enabled = True
         else:
             self._apply_current_hint()
 
+    def _apply_current_hint(self):
+        action = self.get_current_action()
+        if not action:
+            self.is_training_complete = True
+            return
+
+        target = self.device.get_element_by_name(action.parent_element_name)
+        if target:
+            # Only Level 3 (or INFO steps) opens speech bubble and pinpoint frame on the control
+            if self.hint_level == 3 or action.name == ActionName.INFO:
+                target.is_hint_open = True
+                target.hint_text = action.hint_text
+            else:
+                target.is_hint_open = False
+
     def reset(self):
         self.algorithm = None
         self.current_action_index = -1
         self.is_training_complete = False
+        self.hint_level = 1
+        self.mistakes_on_step = 0
+        self.total_training_mistakes = 0
+        self.last_mistake_text = ""
+        self.mistake_flash_until_ms = 0

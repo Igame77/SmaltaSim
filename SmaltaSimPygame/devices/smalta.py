@@ -236,24 +236,132 @@ def get_smalta_algorithms() -> List[Algorithm]:
         "lo01k_modulation_24channel": 1
     }
     prep_actions = [
-        Action(ActionName.CLICK, "lo01p_thumbler_light", "Установите данный тумблер в положение ПОДСВЕТ", 1),
-        Action(ActionName.CLICK, "lo01p_thumbler_1channel", "Установите данный тумблер в положение I КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01p_thumbler_2channel", "Установите данный тумблер в положение II КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01p_thumbler_3channel", "Установите данный тумблер в положение III КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01p_thumbler_4channel", "Установите данный тумблер в положение IV КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01p_thumbler_simulator", "Установите данный тумблер в положение ОТКЛ.", 0),
-        Action(ActionName.CLICK, "lo01r_reciever_1channel", "Установите данный тумблер в положение I КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_reciever_2channel", "Установите данный тумблер в положение II КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_reciever_3channel", "Установите данный тумблер в положение III КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_reciever_4channel", "Установите данный тумблер в положение IV КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_transmitter_1channel", "Установите данный тумблер в положение I КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_transmitter_2channel", "Установите данный тумблер в положение II КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_transmitter_3channel", "Установите данный тумблер в положение III КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_transmitter_4channel", "Установите данный тумблер в положение IV КАНАЛ", 1),
-        Action(ActionName.CLICK, "lo01r_antenna_equal", "Установите данный тумблер в положение Эквивалент", 1),
-        Action(ActionName.CLICK, "lo01r_modulation", "Установите данный переключатель в положение ОТКЛ. (0)", 0),
-        Action(ActionName.CLICK, "lo01k_modulation_13channel", "Установите данный тумблер в положение ВКЛ.", 1),
-        Action(ActionName.CLICK, "lo01k_modulation_24channel", "Установите данный тумблер в положение ВКЛ.", 1),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_light",
+            hint_text="Установите данный тумблер в положение ПОДСВЕТ",
+            expected_value=1,
+            hint_indirect="Обеспечьте визуальный контроль: включите подсветку приборов изделия",
+            hint_clarify="Блок ЛО01П: найдите группу тумблеров каналов и включите тумблер 'ПОДСВЕТ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_1channel",
+            hint_text="Установите данный тумблер в положение I КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подготовьте первый приёмо-передающий канал на пульте управления",
+            hint_clarify="Блок ЛО01П: переведите тумблер питания I канала в положение 'I КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_2channel",
+            hint_text="Установите данный тумблер в положение II КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подготовьте второй канал на пульте управления",
+            hint_clarify="Блок ЛО01П: переведите тумблер питания II канала в положение 'II КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_3channel",
+            hint_text="Установите данный тумблер в положение III КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подготовьте третий канал на пульте управления",
+            hint_clarify="Блок ЛО01П: переведите тумблер питания III канала в положение 'III КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_4channel",
+            hint_text="Установите данный тумблер в положение IV КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подготовьте четвёртый канал на пульте управления",
+            hint_clarify="Блок ЛО01П: переведите тумблер питания IV канала в положение 'IV КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_simulator",
+            hint_text="Установите данный тумблер в положение ОТКЛ.",
+            expected_value=0,
+            hint_indirect="Для штатной подготовки отключите режим имитации сигналов",
+            hint_clarify="Блок ЛО01П: проверьте тумблер 'ИМИТАТОР' и установите его в положение 'ОТКЛ.'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_reciever_1channel",
+            hint_text="Установите данный тумблер в положение I КАНАЛ",
+            expected_value=1,
+            hint_indirect="На распределительном блоке подключите приёмный тракт первого канала",
+            hint_clarify="Блок ЛО01Р: найдите секцию 'ПРИЕМ' и включите тумблер I канала"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_reciever_2channel",
+            hint_text="Установите данный тумблер в положение II КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите приёмный тракт второго канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПРИЕМ' -> переведите тумблер II канала в положение 'II КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_reciever_3channel",
+            hint_text="Установите данный тумблер в положение III КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите приёмный тракт третьего канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПРИЕМ' -> переведите тумблер III канала в положение 'III КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_reciever_4channel",
+            hint_text="Установите данный тумблер в положение IV КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите приёмный тракт четвёртого канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПРИЕМ' -> переведите тумблер IV канала в положение 'IV КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_transmitter_1channel",
+            hint_text="Установите данный тумблер в положение I КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите передающий тракт первого канала",
+            hint_clarify="Блок ЛО01Р: найдите секцию 'ПЕРЕДАЧА' и включите тумблер I канала"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_transmitter_2channel",
+            hint_text="Установите данный тумблер в положение II КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите передающий тракт второго канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПЕРЕДАЧА' -> переведите тумблер II канала в положение 'II КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_transmitter_3channel",
+            hint_text="Установите данный тумблер в положение III КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите передающий тракт третьего канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПЕРЕДАЧА' -> переведите тумблер III канала в положение 'III КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_transmitter_4channel",
+            hint_text="Установите данный тумблер в положение IV КАНАЛ",
+            expected_value=1,
+            hint_indirect="Подключите передающий тракт четвёртого канала",
+            hint_clarify="Блок ЛО01Р: секция 'ПЕРЕДАЧА' -> переведите тумблер IV канала в положение 'IV КАНАЛ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_antenna_equal",
+            hint_text="Установите данный тумблер в положение Эквивалент",
+            expected_value=1,
+            hint_indirect="Обеспечьте безопасность излучения: нагрузите станцию на эквивалент антенны",
+            hint_clarify="Блок ЛО01Р: переведите тумблер антенны в положение 'ЭКВИВАЛЕНТ'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01r_modulation",
+            hint_text="Установите данный переключатель в положение ОТКЛ. (0)",
+            expected_value=0,
+            hint_indirect="Отключите внутреннюю модуляцию для исходной калибровки аппаратуры",
+            hint_clarify="Блок ЛО01Р: переключатель 'МОДУЛЯЦИЯ' установите в положение 0 (ОТКЛ.)"
+        ),
+        Action(
+            ActionName.CLICK, "lo01k_modulation_13channel",
+            hint_text="Установите данный тумблер в положение ВКЛ.",
+            expected_value=1,
+            hint_indirect="Подготовьте модуляционные цепи для нечётных каналов (1 и 3)",
+            hint_clarify="Блок ЛО01К: включите тумблер модуляции каналов 1-3 в положение 'ВКЛ.'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01k_modulation_24channel",
+            hint_text="Установите данный тумблер в положение ВКЛ.",
+            expected_value=1,
+            hint_indirect="Подготовьте модуляционные цепи для чётных каналов (2 и 4)",
+            hint_clarify="Блок ЛО01К: включите тумблер модуляции каналов 2-4 в положение 'ВКЛ.'"
+        ),
     ]
     algo_prep = Algorithm("Подготовка изделия ЛО01 к включению", prep_start, prep_end, prep_actions)
 
@@ -284,16 +392,73 @@ def get_smalta_algorithms() -> List[Algorithm]:
         "lo01k_modulation_24channel": 1,
     }
     launch_actions = [
-        Action(ActionName.CLICK, "lo01p_button_reciever_glow_on", "Включите ПРОГРЕВ", 1),
-        Action(ActionName.IDLE, "lo01r_lamp_heating", "Дождитесь окончания прогрева (лампа погаснет)", 0, use_in_examine_check=True),
-        Action(ActionName.IDLE, "lo01p_reciever_1channel", "Дождитесь включения высокого напряжения (загорятся табло)", 1),
-        Action(ActionName.INFO, "lo01p_reciever_1channel_arrow", "Заметьте: стрелки приборов 'ПРИЕМ' показывают значение менее 20 мкА"),
-        Action(ActionName.CLICK, "lo01p_button_transmitter_on", "Теперь включите передатчик", 1),
-        Action(ActionName.INFO, "lo01p_transmitter_1channel_arrow", "Заметьте: стрелки приборов 'ПЕРЕДАЧА' показывают более 10 мкА"),
-        Action(ActionName.CLICK, "lo01p_thumbler_simulator", "Включите имитатор", 1),
-        Action(ActionName.CLICK, "lo01i_thumbler_2generator", "Включите генератор 2", 1),
-        Action(ActionName.INFO, "lo01p_reciever_1channel_arrow", "Заметьте: стрелки приборов 'ПРИЕМ' показывают завышенные значения"),
-        Action(ActionName.INFO, "lo01p_transmitter_1channel_arrow", "А стрелки 'ПЕРЕДАЧА' отклонились от первоначального значения"),
+        Action(
+            ActionName.CLICK, "lo01p_button_reciever_glow_on",
+            hint_text="Включите ПРОГРЕВ",
+            expected_value=1,
+            hint_indirect="Запустите систему: подайте накал и начните прогрев радиоаппаратуры станции",
+            hint_clarify="Блок ЛО01П: в секции 'ПРИЕМ' нажмите кнопку включения прогрева/накала"
+        ),
+        Action(
+            ActionName.IDLE, "lo01r_lamp_heating",
+            hint_text="Дождитесь окончания прогрева (лампа погаснет)",
+            expected_value=0,
+            use_in_examine_check=True,
+            hint_indirect="Ожидайте стабилизации теплового режима радиоламп станции",
+            hint_clarify="Блок ЛО01Р: контролируйте сигнальную лампу 'ПРОГРЕВ' до её погасания"
+        ),
+        Action(
+            ActionName.IDLE, "lo01p_reciever_1channel",
+            hint_text="Дождитесь включения высокого напряжения (загорятся табло)",
+            expected_value=1,
+            hint_indirect="Ожидайте автоматической подачи анодного высокого напряжения",
+            hint_clarify="Блок ЛО01П: контролируйте загорание световых табло каналов приёма"
+        ),
+        Action(
+            ActionName.INFO, "lo01p_reciever_1channel_arrow",
+            hint_text="Заметьте: стрелки приборов 'ПРИЕМ' показывают значение менее 20 мкА",
+            hint_indirect="Оцените исходную работоспособность приёмного тракта по приборам",
+            hint_clarify="Блок ЛО01П: проверьте стрелочные миллиамперметры каналов 'ПРИЕМ' (норма < 20 мкА)"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_button_transmitter_on",
+            hint_text="Теперь включите передатчик",
+            expected_value=1,
+            hint_indirect="Переведите комплекс в режим излучения: активируйте передающий тракт",
+            hint_clarify="Блок ЛО01П: в секции 'ПЕРЕДАЧА' нажмите кнопку включения передатчика"
+        ),
+        Action(
+            ActionName.INFO, "lo01p_transmitter_1channel_arrow",
+            hint_text="Заметьте: стрелки приборов 'ПЕРЕДАЧА' показывают более 10 мкА",
+            hint_indirect="Проконтролируйте выходную мощность и рабочие токи передатчика",
+            hint_clarify="Блок ЛО01П: проверьте стрелочные индикаторы 'ПЕРЕДАЧА' (норма > 10 мкА)"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_simulator",
+            hint_text="Включите имитатор",
+            expected_value=1,
+            hint_indirect="Проверьте отклик аппаратуры: задействуйте встроенный имитатор сигналов",
+            hint_clarify="Блок ЛО01П: включите тумблер 'ИМИТАТОР' в верхнее положение"
+        ),
+        Action(
+            ActionName.CLICK, "lo01i_thumbler_2generator",
+            hint_text="Включите генератор 2",
+            expected_value=1,
+            hint_indirect="Подайте высокочастотный помеховый сигнал со второго генератора",
+            hint_clarify="Блок ЛО01И: найдите секцию генераторов и включите тумблер 'ГЕНЕРАТОР 2'"
+        ),
+        Action(
+            ActionName.INFO, "lo01p_reciever_1channel_arrow",
+            hint_text="Заметьте: стрелки приборов 'ПРИЕМ' показывают завышенные значения",
+            hint_indirect="Оцените реакцию приёмного тракта на тестовый помеховый сигнал",
+            hint_clarify="Блок ЛО01П: обратите внимание на возросшие показания стрелок приборов 'ПРИЕМ'"
+        ),
+        Action(
+            ActionName.INFO, "lo01p_transmitter_1channel_arrow",
+            hint_text="А стрелки 'ПЕРЕДАЧА' отклонились от первоначального значения",
+            hint_indirect="Оцените реакцию передатчика на сигнал активной помехи",
+            hint_clarify="Блок ЛО01П: заметьте отклонение стрелок индикаторов 'ПЕРЕДАЧА' от начального уровня"
+        ),
     ]
     algo_launch = Algorithm("Включение изделия ЛО01", launch_start, {}, launch_actions)
 
@@ -325,11 +490,42 @@ def get_smalta_algorithms() -> List[Algorithm]:
         "lo01i_thumbler_2generator": 1,
     })
     stop_actions = [
-        Action(ActionName.CLICK, "lo01p_thumbler_simulator", "Отключите имитатор", 0),
-        Action(ActionName.CLICK, "lo01p_button_transmitter_off", "Отключите передатчик", 1),
-        Action(ActionName.CLICK, "lo01p_button_reciever_glow_off", "Отключите приемник", 1),
-        Action(ActionName.IDLE, "lo01p_glow_on", "Дождитесь выключения накала", 0, use_in_examine_check=True),
-        Action(ActionName.CLICK, "lo01i_thumbler_2generator", "Выключите генератор 2", 0),
+        Action(
+            ActionName.CLICK, "lo01p_thumbler_simulator",
+            hint_text="Отключите имитатор",
+            expected_value=0,
+            hint_indirect="Начните выключение станции: снимите тестовые воздействия имитатора",
+            hint_clarify="Блок ЛО01П: отключите тумблер 'ИМИТАТОР' (переведите в положение ОТКЛ.)"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_button_transmitter_off",
+            hint_text="Отключите передатчик",
+            expected_value=1,
+            hint_indirect="Прекратите излучение: обесточьте передающий комплекс станции",
+            hint_clarify="Блок ЛО01П: в секции 'ПЕРЕДАЧА' нажмите кнопку выключения передатчика"
+        ),
+        Action(
+            ActionName.CLICK, "lo01p_button_reciever_glow_off",
+            hint_text="Отключите приемник",
+            expected_value=1,
+            hint_indirect="Обесточьте приёмные тракты и отключите цепи накала ламп",
+            hint_clarify="Блок ЛО01П: в секции 'ПРИЕМ' нажмите кнопку отключения накала ('ОТКЛ. НАКАЛ')"
+        ),
+        Action(
+            ActionName.IDLE, "lo01p_glow_on",
+            hint_text="Дождитесь выключения накала",
+            expected_value=0,
+            use_in_examine_check=True,
+            hint_indirect="Ожидайте полного снятия накальных напряжений и остывания ламп",
+            hint_clarify="Блок ЛО01П: проконтролируйте погасание сигнального табло накала 'НАКАЛ ВКЛ.'"
+        ),
+        Action(
+            ActionName.CLICK, "lo01i_thumbler_2generator",
+            hint_text="Выключите генератор 2",
+            expected_value=0,
+            hint_indirect="Завершите отключение комплекса: обесточьте вспомогательный генератор помех",
+            hint_clarify="Блок ЛО01И: переведите тумблер 'ГЕНЕРАТОР 2' в положение ВЫКЛ."
+        ),
     ]
     algo_stop = Algorithm("Выключение изделия ЛО01", stop_start, {}, stop_actions)
 

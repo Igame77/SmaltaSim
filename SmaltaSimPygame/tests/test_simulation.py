@@ -135,12 +135,11 @@ def test_training_mode_step_advancing():
     assert first_action is not None
     assert first_action.parent_element_name == "lo01p_thumbler_light"
 
-    # Only first element should be enabled
+    # All elements are enabled in exploratory training mode
     el = dev.get_element_by_name("lo01p_thumbler_light")
     assert el.is_enabled
-    assert el.is_hint_open
 
-    # Simulate interacting with it
+    # Simulate interacting with it correctly
     el.set_value(1)
     dev.hint_service.on_element_interacted("lo01p_thumbler_light", 1)
 
@@ -148,6 +147,50 @@ def test_training_mode_step_advancing():
     second_action = dev.hint_service.get_current_action()
     assert second_action is not None
     assert second_action.parent_element_name == "lo01p_thumbler_1channel"
+
+def test_training_mode_adaptive_hint_tiers():
+    dev = create_smalta_device()
+    algo = get_smalta_algorithms()[0]
+    dev.hint_service.start_training(algo, dev)
+
+    # 1. Level 1: Indirect hint initially
+    assert dev.hint_service.hint_level == 1
+    assert "Обеспечьте визуальный контроль" in dev.hint_service.get_current_hint_text()
+    target_el = dev.get_element_by_name("lo01p_thumbler_light")
+    assert not target_el.is_hint_open
+
+    # 2. Mistake 1 -> Escalates to Level 2 (Clarifying)
+    dev.hint_service.on_element_interacted("lo01p_thumbler_1channel", 1)
+    assert dev.hint_service.hint_level == 2
+    assert "Блок ЛО01П" in dev.hint_service.get_current_hint_text()
+    assert not target_el.is_hint_open
+
+    # 3. Mistake 2 -> Escalates to Level 3 (Direct hint with popup & glow)
+    dev.hint_service.on_element_interacted("wrong_control", 1)
+    assert dev.hint_service.hint_level == 3
+    assert "Установите данный тумблер в положение ПОДСВЕТ" in dev.hint_service.get_current_hint_text()
+    assert target_el.is_hint_open
+
+    # 4. Correct interaction -> Advances to Step 2, resets hint_level to 1
+    dev.hint_service.on_element_interacted("lo01p_thumbler_light", 1)
+    assert dev.hint_service.current_action_index == 1
+    assert dev.hint_service.hint_level == 1
+    next_action = dev.hint_service.get_current_action()
+    assert next_action.parent_element_name == "lo01p_thumbler_1channel"
+    assert "Подготовьте первый" in dev.hint_service.get_current_hint_text()
+
+def test_training_mode_manual_escalation():
+    dev = create_smalta_device()
+    algo = get_smalta_algorithms()[0]
+    dev.hint_service.start_training(algo, dev)
+
+    assert dev.hint_service.hint_level == 1
+    # User doesn't know what to do -> presses F1 / requests help
+    assert dev.hint_service.escalate_hint() is True
+    assert dev.hint_service.hint_level == 2
+    assert dev.hint_service.escalate_hint() is True
+    assert dev.hint_service.hint_level == 3
+    assert dev.hint_service.escalate_hint() is False  # Already at max level
 
 def test_full_prep_algorithm_execution():
     dev = create_smalta_device()
