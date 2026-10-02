@@ -31,6 +31,8 @@ def build_exe():
         "--name", "SmaltaSim",
         "--icon", str(ICON_PATH),
         "--add-data", f"{ASSETS_DIR};assets",
+        "--collect-all", "pygame",
+        "--hidden-import", "pygame",
         str(BASE_DIR / "main.py")
     ]
     print("Выполнение команды:", " ".join(cmd_onedir))
@@ -47,6 +49,8 @@ def build_exe():
         "--name", "SmaltaSimStandalone",
         "--icon", str(ICON_PATH),
         "--add-data", f"{ASSETS_DIR};assets",
+        "--collect-all", "pygame",
+        "--hidden-import", "pygame",
         str(BASE_DIR / "main.py")
     ]
     print("Выполнение команды:", " ".join(cmd_onefile))
