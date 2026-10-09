@@ -19,3 +19,8 @@ dist/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Exam session data & profiles
+exam_data/
+student_profile.json
+TeacherServer.exe

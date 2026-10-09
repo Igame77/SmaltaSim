@@ -42,12 +42,23 @@ class Algorithm:
 class HistoryService:
     def __init__(self):
         self.actions: List[tuple[ActionName, str]] = []
+        self.on_action_callback: Optional[Callable[[ActionName, str], None]] = None
 
     def record_click(self, element_name: str):
         self.actions.append((ActionName.CLICK, element_name))
+        if self.on_action_callback:
+            try:
+                self.on_action_callback(ActionName.CLICK, element_name)
+            except Exception:
+                pass
 
     def record_idle(self, element_name: str):
         self.actions.append((ActionName.IDLE, element_name))
+        if self.on_action_callback:
+            try:
+                self.on_action_callback(ActionName.IDLE, element_name)
+            except Exception:
+                pass
 
     def reset(self):
         self.actions.clear()

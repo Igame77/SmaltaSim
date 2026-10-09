@@ -64,14 +64,37 @@ def build_exe():
         shutil.copy2(onefile_exe, target_dist_exe)
         print(f"Автономный EXE скопирован в: {target_root_exe} ({target_root_exe.stat().st_size / (1024*1024):.2f} МБ)")
 
-def package_zip(version="v2.1.0"):
-    print("--- 3. Создание релизного ZIP-архива для GitHub ---")
+    print("--- 3. Сборка автономного TeacherServer.exe для преподавателя ---")
+    cmd_teacher = [
+        sys.executable,
+        "-m", "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--name", "TeacherServer",
+        str(BASE_DIR / "teacher_server.py")
+    ]
+    print("Выполнение команды:", " ".join(cmd_teacher))
+    subprocess.run(cmd_teacher, cwd=str(BASE_DIR), check=True)
+
+    teacher_exe = DIST_DIR / "TeacherServer.exe"
+    target_teacher_exe = ROOT_DIR / "TeacherServer.exe"
+    if teacher_exe.exists():
+        shutil.copy2(teacher_exe, target_teacher_exe)
+        print(f"Сервер преподавателя скопирован в: {target_teacher_exe} ({target_teacher_exe.stat().st_size / (1024*1024):.2f} МБ)")
+
+def package_zip(version="v2.2.0"):
+    print("--- 4. Создание релизного ZIP-архива для GitHub ---")
     out_folder = DIST_DIR / "SmaltaSim"
     if not out_folder.exists():
         raise FileNotFoundError(f"Каталог сборки не найден: {out_folder}")
 
-    # Copy README and assets to distribution folder
+    # Copy README, TeacherServer, and assets to distribution folder
     shutil.copy2(BASE_DIR / "README.md", out_folder / "README.md")
+    teacher_exe = DIST_DIR / "TeacherServer.exe"
+    if teacher_exe.exists():
+        shutil.copy2(teacher_exe, out_folder / "TeacherServer.exe")
+
     dest_assets = out_folder / "assets"
     if not dest_assets.exists():
         shutil.copytree(ASSETS_DIR, dest_assets)
@@ -90,5 +113,5 @@ def package_zip(version="v2.1.0"):
 if __name__ == "__main__":
     clean()
     build_exe()
-    package_zip("v2.1.0")
+    package_zip("v2.2.0")
     print("--- Сборка успешно завершена! ---")
