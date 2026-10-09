@@ -43,9 +43,11 @@ def test_teacher_server_and_student_client_integration():
         daemon=True
     )
     server_thread.start()
-    time.sleep(0.8)
-
     client = StudentClient(server_ip="127.0.0.1", server_port=test_port)
+    for _ in range(30):
+        if client.check_connection():
+            break
+        time.sleep(0.1)
 
     # 1. Login
     logged_in = client.login_sync(

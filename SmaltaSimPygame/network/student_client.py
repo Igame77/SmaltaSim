@@ -12,6 +12,7 @@ from network.exam_protocol import (
     DISCOVERY_MAGIC_REQUEST, DISCOVERY_MAGIC_RESPONSE,
     StudentStatus, EventType, serialize_json, deserialize_json
 )
+from network.network_utils import get_local_interfaces, ping_server
 
 class StudentClient:
     def __init__(self, server_ip: str = "127.0.0.1", server_port: int = DEFAULT_SERVER_PORT):
@@ -39,29 +40,64 @@ class StudentClient:
     @staticmethod
     def discover_server(timeout: float = 1.2, port: int = DEFAULT_DISCOVERY_PORT) -> Optional[tuple[str, int]]:
         """
-        Ищет сервер преподавателя в локальной сети через UDP Broadcast.
+        Ищет сервер преподавателя в локальной сети через UDP Broadcast
+        по всем активным сетевым интерфейсам.
         """
+        sockets = []
+        msg = DISCOVERY_MAGIC_REQUEST.encode('utf-8')
         try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            s.settimeout(timeout)
-            msg = DISCOVERY_MAGIC_REQUEST.encode('utf-8')
-            s.sendto(msg, ('<broadcast>', port))
-            # Также пробуем отправить на 255.255.255.255
-            s.sendto(msg, ('255.255.255.255', port))
+            ifaces = get_local_interfaces()
+            for iface in ifaces:
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                    s.settimeout(timeout)
+                    s.bind((iface['ip'], 0))
+                    s.sendto(msg, (iface['broadcast'], port))
+                    s.sendto(msg, ('255.255.255.255', port))
+                    sockets.append(s)
+                except Exception:
+                    pass
 
-            data, addr = s.recvfrom(1024)
-            resp = data.decode('utf-8', errors='ignore').strip()
-            if resp.startswith(DISCOVERY_MAGIC_RESPONSE):
-                parts = resp.split(':')
-                if len(parts) >= 3:
-                    found_ip = parts[1]
-                    found_port = int(parts[2])
-                    return (found_ip, found_port)
-                return (addr[0], DEFAULT_SERVER_PORT)
-        except Exception:
-            pass
+            # Запасной общий сокет
+            try:
+                s_def = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s_def.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                s_def.settimeout(timeout)
+                s_def.sendto(msg, ('<broadcast>', port))
+                s_def.sendto(msg, ('255.255.255.255', port))
+                sockets.append(s_def)
+            except Exception:
+                pass
+
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                for s in sockets:
+                    try:
+                        s.settimeout(0.15)
+                        data, addr = s.recvfrom(1024)
+                        resp = data.decode('utf-8', errors='ignore').strip()
+                        if resp.startswith(DISCOVERY_MAGIC_RESPONSE):
+                            parts = resp.split(':')
+                            found_ip = addr[0]
+                            found_port = DEFAULT_SERVER_PORT
+                            if len(parts) >= 3:
+                                found_ip = parts[1]
+                                found_port = int(parts[2])
+                            return (found_ip, found_port)
+                    except Exception:
+                        continue
+        finally:
+            for s in sockets:
+                try:
+                    s.close()
+                except Exception:
+                    pass
         return None
+
+    def check_connection(self) -> bool:
+        """Проверяет доступность сервера через /api/ping."""
+        return ping_server(self.server_ip, self.server_port, timeout=1.5)
 
     def set_server(self, ip: str, port: int = DEFAULT_SERVER_PORT):
         self.server_ip = ip

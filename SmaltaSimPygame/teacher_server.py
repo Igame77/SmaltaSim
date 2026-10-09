@@ -17,6 +17,9 @@ from network.exam_protocol import (
     DISCOVERY_MAGIC_REQUEST, DISCOVERY_MAGIC_RESPONSE,
     StudentStatus, EventType, serialize_json, deserialize_json
 )
+from network.network_utils import (
+    get_local_interfaces, get_best_ip_for_peer, get_primary_lan_ip
+)
 
 SCREENSHOTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exam_data", "screenshots")
 ARCHIVE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "exam_data", "exam_archive.json")
@@ -122,14 +125,7 @@ class ExamServerState:
 server_state = ExamServerState()
 
 def get_local_ip() -> str:
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+    return get_primary_lan_ip()
 
 class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -158,6 +154,8 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
         if path == "/" or path == "/index.html":
             self._serve_dashboard_html()
+        elif path == "/api/ping":
+            self._send_json({"status": "ok", "app": "VkmExamServer", "version": "2.2.0"})
         elif path == "/api/stream":
             self._serve_sse_stream()
         elif path == "/api/students":
@@ -419,7 +417,16 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(csv_bytes)
 
     def _serve_dashboard_html(self):
-        local_ip = get_local_ip()
+        ifaces = get_local_interfaces()
+        lan_badges = []
+        for iface in ifaces:
+            if not iface["is_virtual"]:
+                desc_l = iface["desc"].lower()
+                label = "Ethernet" if ("ethernet" in desc_l or "usb" in desc_l) else ("Wi-Fi" if ("wi-fi" in desc_l or "wireless" in desc_l) else "LAN")
+                lan_badges.append(f'<span class="badge-ip" title="{iface["desc"]}">IP ({label}): {iface["ip"]}:{DEFAULT_SERVER_PORT}</span>')
+        if not lan_badges:
+            lan_badges.append(f'<span class="badge-ip">IP: {get_primary_lan_ip()}:{DEFAULT_SERVER_PORT}</span>')
+        ip_badges_html = " ".join(lan_badges)
         html = f"""<!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -911,7 +918,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       </div>
     </div>
     <div class="header-actions">
-      <span class="badge-ip">IP: {local_ip}:{DEFAULT_SERVER_PORT}</span>
+      {ip_badges_html}
       <button class="btn btn-success" onclick="startAllExams()">▶ Общий старт</button>
       <a href="/api/export/csv" class="btn btn-outline" download>📥 Скачать ведомость (CSV)</a>
       <button class="btn btn-danger" onclick="clearExamData()">Очистить список</button>
@@ -1312,9 +1319,6 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: int = DEFAULT_DISCOVERY_PORT):
-    local_ip = get_local_ip()
-    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{local_ip}:{port}".encode('utf-8')
-
     # 1. Слушатель запросов на поиск
     def listener():
         try:
@@ -1325,6 +1329,9 @@ def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: in
                 data, addr = s.recvfrom(1024)
                 text = data.decode('utf-8', errors='ignore').strip()
                 if text == DISCOVERY_MAGIC_REQUEST:
+                    client_ip = addr[0]
+                    reply_ip = get_best_ip_for_peer(client_ip) or get_primary_lan_ip()
+                    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{reply_ip}:{port}".encode('utf-8')
                     s.sendto(resp_msg, addr)
         except Exception:
             pass
@@ -1332,33 +1339,52 @@ def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: in
     t1 = threading.Thread(target=listener, daemon=True)
     t1.start()
 
-    # 2. Периодический маяк (beacon) раз в 3 сек
+    # 2. Периодический маяк (beacon) раз в 3 сек на всех физических адаптерах
     def beacon():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            while True:
-                try:
-                    s.sendto(resp_msg, ('<broadcast>', disc_port))
-                    s.sendto(resp_msg, ('255.255.255.255', disc_port))
-                except Exception:
-                    pass
-                time.sleep(3.0)
-        except Exception:
-            pass
+        while True:
+            try:
+                ifaces = get_local_interfaces()
+                for iface in ifaces:
+                    if iface["is_virtual"]:
+                        continue
+                    iface_ip = iface["ip"]
+                    broadcast_addr = iface["broadcast"]
+                    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{iface_ip}:{port}".encode('utf-8')
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                        s.bind((iface_ip, 0))
+                        s.sendto(resp_msg, (broadcast_addr, disc_port))
+                        s.sendto(resp_msg, ('255.255.255.255', disc_port))
+                        s.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(3.0)
 
     t2 = threading.Thread(target=beacon, daemon=True)
     t2.start()
 
 def run_server(port: int = DEFAULT_SERVER_PORT, auto_open: bool = True):
     server = ThreadingHTTPServer(('0.0.0.0', port), TeacherHTTPRequestHandler)
-    local_ip = get_local_ip()
-    print("=" * 65)
+    ifaces = get_local_interfaces()
+    print("=" * 68)
     print(f"  Vkm.ComplexSim — Экзаменационный сервер преподавателя запущен!")
-    print(f"  Веб-дашборд доступен по адресам:")
+    print(f"  Веб-дашборд доступен:")
     print(f"    * Локально на этом ПК: http://localhost:{port}")
-    print(f"    * По сети (для курсантов): http://{local_ip}:{port}")
-    print("=" * 65)
+    print(f"    * В локальной сети для подключения курсантов:")
+    found_any = False
+    for iface in ifaces:
+        if not iface["is_virtual"]:
+            found_any = True
+            desc_l = iface["desc"].lower()
+            label = "Ethernet" if ("ethernet" in desc_l or "usb" in desc_l) else ("Wi-Fi" if ("wi-fi" in desc_l or "wireless" in desc_l) else "LAN")
+            gw_note = " (шлюз активен)" if iface["has_gateway"] else ""
+            print(f"        -> http://{iface['ip']}:{port}  [{label}: {iface['desc']}{gw_note}]")
+    if not found_any:
+        print(f"        -> http://{get_primary_lan_ip()}:{port}")
+    print("=" * 68)
 
     start_udp_broadcast_responder(port)
 

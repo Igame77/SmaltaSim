@@ -9,6 +9,7 @@ from config import SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_TEXT, COLOR_TEXT_DIM
 from ui.ui_widgets import UIButton
 from network.student_client import StudentClient
 from network.exam_protocol import DEFAULT_SERVER_PORT
+from network.network_utils import ping_server
 
 PROFILE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "student_profile.json")
 
@@ -178,7 +179,8 @@ class StudentAuthDialog:
         self.status_color = (245, 158, 11)
 
         def discover_worker():
-            res = StudentClient.discover_server(timeout=1.2)
+            # 1. Сначала пробуем UDP broadcast автопоиск
+            res = StudentClient.discover_server(timeout=1.5)
             if res:
                 ip, port = res
                 self.f_server_ip.value = ip
@@ -186,13 +188,44 @@ class StudentAuthDialog:
                 self.server_found = True
                 self.status_msg = f"✓ Сервер преподавателя найден: {ip}:{port}"
                 self.status_color = (52, 211, 153)
-            else:
-                self.server_found = False
-                self.status_msg = "Сервер в сети не найден (будет запущен автономный режим)"
-                self.status_color = (156, 163, 175)
+                return
+
+            # 2. Если UDP broadcast не ответил (например, изоляция Wi-Fi / AP Isolation),
+            # проверяем IP, уже введенный в поле
+            cur_ip = self.f_server_ip.value.strip()
+            if cur_ip and cur_ip != "127.0.0.1" and ping_server(cur_ip, DEFAULT_SERVER_PORT, timeout=0.8):
+                self.client.set_server(cur_ip, DEFAULT_SERVER_PORT)
+                self.server_found = True
+                self.status_msg = f"✓ Связь с сервером подтверждена: {cur_ip}:{DEFAULT_SERVER_PORT}"
+                self.status_color = (52, 211, 153)
+                return
+
+            self.server_found = False
+            self.status_msg = "Сервер не найден автоматически (введите IP преподавателя вручную)"
+            self.status_color = (245, 158, 11)
 
         t = threading.Thread(target=discover_worker, daemon=True)
         t.start()
+
+    def check_entered_ip(self):
+        target_ip = self.f_server_ip.value.strip()
+        if not target_ip:
+            return
+        self.status_msg = f"Проверка связи с {target_ip}..."
+        self.status_color = (245, 158, 11)
+
+        def ping_worker():
+            if ping_server(target_ip, DEFAULT_SERVER_PORT, timeout=1.2):
+                self.client.set_server(target_ip, DEFAULT_SERVER_PORT)
+                self.server_found = True
+                self.status_msg = f"✓ Связь с сервером подтверждена: {target_ip}:{DEFAULT_SERVER_PORT}"
+                self.status_color = (52, 211, 153)
+            else:
+                self.server_found = False
+                self.status_msg = f"✕ Сервер {target_ip} недоступен (проверьте IP или Брандмауэр)"
+                self.status_color = (239, 68, 68)
+
+        threading.Thread(target=ping_worker, daemon=True).start()
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if self.btn_confirm.handle_event(event):
@@ -200,6 +233,8 @@ class StudentAuthDialog:
         if self.btn_cancel.handle_event(event):
             return True
         if self.btn_search.handle_event(event):
+            # Кнопка Поиск проверяет введенный IP и запускает автопоиск
+            self.start_auto_discovery()
             return True
 
         # Переключение Tab между полями
@@ -222,6 +257,8 @@ class StudentAuthDialog:
         if self.f_pc.handle_event(event):
             return True
         if self.f_server_ip.handle_event(event):
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+                self.check_entered_ip()
             return True
 
         return True  # Блокирует клики под модальным окном
