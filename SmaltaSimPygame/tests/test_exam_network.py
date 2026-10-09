@@ -110,3 +110,31 @@ def test_teacher_server_and_student_client_integration():
         assert len(st.screenshots) >= 1
 
     client.stop()
+
+def test_app_examine_flow(monkeypatch):
+    import os
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    from main import SimulatorApp, ApplicationMode
+    app = SimulatorApp()
+
+    # Test opening auth dialog
+    app._open_exam_auth_dialog()
+    assert app.active_dialog is not None
+
+    # Test auth confirmed
+    app._on_auth_confirmed({
+        "full_name": "Тест Студент",
+        "group": "401",
+        "pc_name": "ПК-ТЕСТ",
+        "server_ip": "127.0.0.1"
+    }, app.student_client)
+    assert app.mode == ApplicationMode.EXAMINE
+    assert app.active_dialog is not None  # Device selection dialog
+
+    # Test choosing device and algo
+    smalta_dev = app.devices_catalog["smalta"]
+    algo = app.algorithms_catalog["smalta"][0]
+    app._prepare_examine_session(smalta_dev, algo)
+    # Should not raise NameError or any exception!
+    assert app.active_device is not None or app.active_dialog is not None
+

@@ -1,5 +1,6 @@
 import sys
 import time
+import socket
 import pygame
 from typing import Optional, List, Dict, Any
 from enum import Enum, auto
