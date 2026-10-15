@@ -79,6 +79,8 @@ class HistoryService:
         ethalon_in_user_count = 0
         right_order_count = 0
         wrong_actions_count = 0
+        last_wrong_element: Optional[str] = None
+        is_revert = False
 
         for user_action_name, user_el_name in self.actions:
             action_is_right = False
@@ -95,8 +97,19 @@ class HistoryService:
                         right_order_count += 1
                     break
 
-            if not action_is_right and user_action_name == ActionName.CLICK:
-                wrong_actions_count += 1
+            if action_is_right:
+                last_wrong_element = None
+                is_revert = False
+            elif user_action_name == ActionName.CLICK:
+                # Если курсант нажал не на тот элемент, но не совершал других действий
+                # и сразу вернул его в исходное положение (повторное нажатие на тот же неверный элемент),
+                # засчитывается только 1 ошибка, а не 2!
+                if last_wrong_element == user_el_name and not is_revert:
+                    is_revert = True
+                else:
+                    wrong_actions_count += 1
+                    last_wrong_element = user_el_name
+                    is_revert = False
 
         if ethalon_in_user_count > ethalon_count:
             ethalon_in_user_count = ethalon_count

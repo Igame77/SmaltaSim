@@ -124,6 +124,18 @@ def test_history_scoring_math():
     assert res["score"] == 3
     assert res["wrong_actions"] == 2
 
+    # 3. Sequence with immediate revert: wrong click followed immediately by returning it
+    history.reset()
+    history.record_click("el_1")
+    history.record_click("wrong_element")
+    history.record_click("wrong_element")  # immediate revert
+    history.record_click("el_2")
+    history.record_click("el_3")
+    res = history.calculate_score(algo)
+    # 5 - 1 wrong (revert deduplicated) = 4
+    assert res["score"] == 4
+    assert res["wrong_actions"] == 1
+
 def test_training_mode_step_advancing():
     dev = create_smalta_device()
     algos = get_smalta_algorithms()

@@ -20,7 +20,7 @@ from ui.ui_widgets import UIButton, ModalDialog
 from ui.hint_renderer import HintRenderer
 from ui.student_auth_dialog import StudentAuthDialog, WaitingForTeacherDialog
 from network.student_client import StudentClient
-from network.screen_tracker import ScreenTracker
+from network.action_annotator import ActionAnnotator
 from network.exam_protocol import EventType, StudentStatus
 
 class AppState(Enum):
@@ -43,12 +43,13 @@ class SimulatorApp:
         self.menu_bg = pygame.image.load(str(Assets.BG_MAIN)).convert()
         self.menu_bg = pygame.transform.smoothscale(self.menu_bg, (SCREEN_WIDTH, SCREEN_HEIGHT))
 
-        # Fonts
-        self.title_font = pygame.font.SysFont("Arial", 36, bold=True)
-        self.subtitle_font = pygame.font.SysFont("Arial", 18)
-        self.nav_font = pygame.font.SysFont("Arial", 14, bold=True)
-        self.badge_font = pygame.font.SysFont("Arial", 13, bold=True)
-        self.header_font = pygame.font.SysFont("Arial", 14, bold=True)
+        # Fonts - четкие детальные шрифты с поддержкой Segoe UI / Calibri
+        font_families = ["segoeui", "calibri", "arial"]
+        self.title_font = pygame.font.SysFont(font_families, 36, bold=True)
+        self.subtitle_font = pygame.font.SysFont(font_families, 18)
+        self.nav_font = pygame.font.SysFont(font_families, 14, bold=True)
+        self.badge_font = pygame.font.SysFont(font_families, 13, bold=True)
+        self.header_font = pygame.font.SysFont(font_families, 14, bold=True)
 
         # TrollFace Easter egg
         self.troll_face_img = pygame.image.load(str(Assets.TROLL_FACE)).convert_alpha()
@@ -65,15 +66,12 @@ class SimulatorApp:
         self.active_dialog: Optional[Any] = None
         self.hint_renderer = HintRenderer()
 
-        # Network monitoring & anti-cheat
+        # Network monitoring & action screenshot annotator
         self.student_client = StudentClient()
-        self.screen_tracker = ScreenTracker("ComplexSim")
+        self.action_annotator = ActionAnnotator()
         self.student_data: Dict[str, Any] = {}
         self.is_network_exam: bool = False
-        self.screenshot_interval: float = 8.0
-        self.last_screenshot_time: float = 0.0
         self.last_heartbeat_time: float = 0.0
-        self.last_focus_check_time: float = 0.0
         self.exam_start_time: float = 0.0
         self._prev_wrong_actions: int = 0
 
@@ -202,6 +200,12 @@ class SimulatorApp:
         )
 
     def _open_algorithm_selection(self, dev_key: str):
+        # Пересоздаем изделие заново, чтобы исключить остаточные положения тумблеров предыдущего курсанта
+        if dev_key == "smalta":
+            self.devices_catalog["smalta"] = create_smalta_device()
+        elif dev_key == "rls":
+            self.devices_catalog["rls"] = create_rls_device()
+
         device = self.devices_catalog[dev_key]
         algos = self.algorithms_catalog[dev_key]
 
@@ -246,6 +250,9 @@ class SimulatorApp:
         )
         if logged_in:
             self.is_network_exam = True
+            # Запускаем фоновый поток клиента для своевременного получения команд от сервера
+            self.student_client.start()
+
             if self.student_client.is_exam_started_by_server:
                 self.start_simulation(device, algo)
             else:
@@ -265,15 +272,11 @@ class SimulatorApp:
                     on_start_now=on_start_offline,
                     on_cancel=on_cancel_wait
                 )
+                self._pending_device = device
+                self._pending_algo = algo
 
                 def handle_cmd(cmd_type, payload):
-                    if cmd_type == "START_EXAM":
-                        self.active_dialog = None
-                        self.start_simulation(device, algo)
-                    elif cmd_type == "STOP_EXAM":
-                        self._on_finish_click()
-                    elif cmd_type == "REQUEST_SCREENSHOT":
-                        self._send_immediate_screenshot()
+                    self.student_client.incoming_commands.put((cmd_type, payload))
 
                 self.student_client.on_command_callback = handle_cmd
         else:
@@ -283,59 +286,135 @@ class SimulatorApp:
     def _on_device_action_recorded(self, action_name, element_name):
         if self.mode != ApplicationMode.EXAMINE or not self.active_device or not self.active_device.current_algorithm:
             return
-        if not self.is_network_exam:
-            return
 
         res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
         wrong_count = res.get("wrong_actions", 0)
 
-        if wrong_count > self._prev_wrong_actions:
-            self._prev_wrong_actions = wrong_count
-            self.student_client.send_event(
-                EventType.MISTAKE,
-                f"Ошибочное действие: '{element_name}' (всего ошибок: {wrong_count})",
-                is_mistake=True
-            )
-            self._send_immediate_screenshot()
-        else:
-            self.student_client.send_event(
-                EventType.ACTION,
-                f"Выполнено действие: '{element_name}'"
-            )
+        hs = self.active_device.hint_service
+        expected_action = hs.get_current_action()
+        cur_step_idx = hs.current_action_index
+        total_steps = len([a for a in self.active_device.current_algorithm.actions if a.use_in_examine_check])
 
-    def _send_immediate_screenshot(self):
+        el = self.active_device.get_element_by_name(element_name)
+        val = el.value if el else 0
+
+        # Если курсант нажал не на тот элемент, но сразу вернул его в исходное положение (повторное нажатие),
+        # то ошибка засчитывается только одна, а возврат регистрируется как нейтральное действие
+        is_revert = False
+        if getattr(self, '_last_wrong_element', None) == element_name and wrong_count == self._prev_wrong_actions:
+            is_revert = True
+            self._last_wrong_element = None
+
+        if is_revert:
+            if self.is_network_exam:
+                msg = f"Возврат органа управления '{element_name}' в исходное положение (ошибка не дублируется)"
+                self.student_client.send_event(
+                    EventType.ACTION,
+                    msg,
+                    details={
+                        "step": cur_step_idx + 1,
+                        "total_steps": total_steps,
+                        "clicked_element": element_name,
+                        "is_mistake": False,
+                        "is_revert": True
+                    },
+                    is_mistake=False
+                )
+            return
+
+        is_mistake = (wrong_count > self._prev_wrong_actions)
+
+        if is_mistake:
+            self._prev_wrong_actions = wrong_count
+            self._last_wrong_element = element_name
+        else:
+            self._last_wrong_element = None
+
+        # Обновляем прогресс hint_service только для обычных действий и новых ошибок
+        hs.on_element_interacted(element_name, val)
+
         if not self.is_network_exam:
             return
+
+        # 1. Аннотированный снимок экрана с BBox ошибочного (красный) и нужного (зеленый) органа
         try:
-            jpeg = self.screen_tracker.capture_screenshot_jpeg()
+            jpeg = self.action_annotator.capture_action_snapshot(
+                screen_surface=self.screen,
+                is_mistake=is_mistake,
+                clicked_element_name=element_name,
+                device=self.active_device,
+                current_step_idx=cur_step_idx,
+                total_steps=total_steps,
+                expected_action=expected_action
+            )
             if jpeg:
                 self.student_client.send_screenshot(jpeg)
         except Exception:
             pass
 
+        # 2. Формируем подробную запись в журнал с контекстом из обучения
+        hint_txt = expected_action.hint_text if expected_action else ""
+        expected_name = expected_action.parent_element_name if expected_action else "—"
+
+        if is_mistake:
+            msg = f"ОШИБКА (шаг {cur_step_idx + 1}/{total_steps}): нажато '{element_name}', требовалось '{expected_name}'"
+            if hint_txt:
+                msg += f" • [Контекст задачи: {hint_txt}]"
+            self.student_client.send_event(
+                EventType.MISTAKE,
+                msg,
+                details={
+                    "step": cur_step_idx + 1,
+                    "total_steps": total_steps,
+                    "clicked_element": element_name,
+                    "expected_element": expected_name,
+                    "hint_context": hint_txt,
+                    "is_mistake": True
+                },
+                is_mistake=True
+            )
+        else:
+            msg = f"Выполнено действие (шаг {cur_step_idx + 1}/{total_steps}): '{element_name}'"
+            if hint_txt:
+                msg += f" • [Задача: {hint_txt}]"
+            self.student_client.send_event(
+                EventType.ACTION,
+                msg,
+                details={
+                    "step": cur_step_idx + 1,
+                    "total_steps": total_steps,
+                    "clicked_element": element_name,
+                    "hint_context": hint_txt,
+                    "is_mistake": False
+                },
+                is_mistake=False
+            )
+
     def start_simulation(self, device: DeviceBase, algorithm):
         self.active_device = device
         self.is_god_mode = False
         self.entered_keys.clear()
+        self._prev_wrong_actions = 0
+        self._last_wrong_element = None
         device.apply_algorithm(algorithm)
+        device.hint_service.start_training(algorithm, device)
 
         if self.mode == ApplicationMode.TRAINING:
-            device.hint_service.start_training(algorithm, device)
+            pass
         else:
             for el in device.elements:
                 el.is_enabled = True
                 el.is_hint_open = False
             self.exam_start_time = time.time()
-            self.last_screenshot_time = time.time()
             self.last_heartbeat_time = time.time()
             self._prev_wrong_actions = 0
+            self._last_wrong_element = None
             device.history_service.on_action_callback = self._on_device_action_recorded
             if self.is_network_exam:
                 self.student_client.send_event(
                     EventType.INFO,
                     f"Экзамен начат по заданию: '{algorithm.name}'"
                 )
-                self._send_immediate_screenshot()
 
         self._build_navbar_buttons()
         self.state = AppState.SIMULATION
@@ -452,24 +531,117 @@ class SimulatorApp:
             wrong_cnt = 0 if self.is_god_mode else res.get("wrong_actions", 0)
             self.student_client.send_event(
                 EventType.FINISH,
-                f"Экзамен завершен. Оценка: {score}. Ошибок: {wrong_cnt}"
+                f"Экзамен завершен. Оценка: {score}. Ошибок: {wrong_cnt}",
+                details={"score": score, "wrong_actions": wrong_cnt}
             )
-            self._send_immediate_screenshot()
-
-        def retry():
-            self.active_dialog = None
-            self.start_simulation(self.active_device, self.active_device.current_algorithm)
+            self.is_network_exam = False
+            self.student_client.stop()
 
         def exit_to_menu():
             self.active_dialog = None
             self.state = AppState.MAIN_MENU
+            # Полный сброс каталога изделий для следующего курсанта
+            self.devices_catalog = {
+                "smalta": create_smalta_device(),
+                "rls": create_rls_device(),
+            }
             self.active_device = None
 
-        buttons = [
-            ("Повторить", retry, (45, 110, 160)),
-            ("В главное меню", exit_to_menu, (70, 80, 90)),
-        ]
+        if self.mode == ApplicationMode.EXAMINE:
+            # На экзамене кнопка 'Повторить' не имеет смысла
+            buttons = [
+                ("В главное меню", exit_to_menu, (30, 130, 80)),
+            ]
+        else:
+            def retry():
+                self.active_dialog = None
+                self.start_simulation(self.active_device, self.active_device.current_algorithm)
+
+            buttons = [
+                ("Повторить", retry, (45, 110, 160)),
+                ("В главное меню", exit_to_menu, (70, 80, 90)),
+            ]
         self.active_dialog = ModalDialog(title, details_str, buttons, width=560, height=280, layout="row")
+
+    def _force_terminate_by_teacher(self):
+        """
+        Принудительное завершение экзамена преподавателем:
+        - Мгновенно закрывает любые диалоговые окна (без вопроса подтверждения)
+        - Рассчитывает и сохраняет текущий прогресс и отправляет итоговый отчет на сервер
+        - Останавливает сетевой клиент и аудит (прекращает запись в журнал)
+        - Выводит окно с результатом и единственной кнопкой 'В главное меню'
+        """
+        self.active_dialog = None
+
+        score = 0
+        details_str = ""
+        res = None
+        if self.active_device and self.active_device.current_algorithm:
+            if self.is_god_mode:
+                score = 5
+                details_str = "Активирован специальный режим отличника (GodMode)!\nОценка: 5 (Отлично)\nОшибок: 0"
+            else:
+                res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
+                score = res["score"]
+                pct_ethalon = res.get("pct_ethalon", 0.0)
+                pct_order = res.get("pct_order", 0.0)
+                wrong_actions = res.get("wrong_actions", 0)
+                details_str = (
+                    f"Итоговая оценка: {score} из 5\n"
+                    f"Выполнено эталонных действий: {int(pct_ethalon * 100)}%\n"
+                    f"Правильный порядок: {int(pct_order * 100)}%\n"
+                    f"Ошибочных действий: {wrong_actions}"
+                )
+
+        if self.is_network_exam and self.student_client:
+            wrong_cnt = 0 if self.is_god_mode else (res.get("wrong_actions", 0) if res else 0)
+            try:
+                self.student_client.send_event(
+                    EventType.FINISH,
+                    f"Экзамен принудительно остановлен преподавателем. Оценка: {score}. Ошибок: {wrong_cnt}",
+                    details={
+                        "score": score,
+                        "wrong_actions": wrong_cnt,
+                        "forced_by_teacher": True
+                    }
+                )
+            except Exception:
+                pass
+
+        # Полная остановка сетевого клиента и аудита
+        self.is_network_exam = False
+        if self.student_client:
+            try:
+                self.student_client.stop()
+            except Exception:
+                pass
+
+        def exit_to_menu():
+            self.active_dialog = None
+            self.state = AppState.MAIN_MENU
+            self.devices_catalog = {
+                "smalta": create_smalta_device(),
+                "rls": create_rls_device(),
+            }
+            self.active_device = None
+
+        if self.state != AppState.SIMULATION or not self.active_device:
+            exit_to_menu()
+            return
+
+        grade_names = {
+            5: "ОТЛИЧНО (5)",
+            4: "ХОРОШО (4)",
+            3: "УДОВЛЕТВОРИТЕЛЬНО (3)",
+            2: "НЕУДОВЛЕТВОРИТЕЛЬНО (2)",
+            1: "НЕУДОВЛЕТВОРИТЕЛЬНО (1)",
+        }
+        title = f"Экзамен остановлен преподавателем: {grade_names.get(score, str(score))}"
+        msg = "Экзамен был принудительно завершен преподавателем.\nТекущий прогресс и оценка сохранены в ведомость.\n\n" + details_str
+        buttons = [
+            ("В главное меню", exit_to_menu, (30, 130, 80)),
+        ]
+        self.active_dialog = ModalDialog(title, msg, buttons, width=580, height=290, layout="row")
 
     def _check_cheat_code(self, key):
         if self.mode != ApplicationMode.EXAMINE or self.is_god_mode:
@@ -488,21 +660,26 @@ class SimulatorApp:
             dt_ms = self.clock.tick(FPS)
             TimerService.get_instance().update()
 
+            # Обработка команд от преподавателя в главном потоке Pygame
+            if self.student_client:
+                while not self.student_client.incoming_commands.empty():
+                    try:
+                        cmd_type, payload = self.student_client.incoming_commands.get_nowait()
+                        if cmd_type == "START_EXAM":
+                            if isinstance(self.active_dialog, WaitingForTeacherDialog):
+                                self.active_dialog = None
+                                if hasattr(self, '_pending_device') and hasattr(self, '_pending_algo') and self._pending_device and self._pending_algo:
+                                    self.start_simulation(self._pending_device, self._pending_algo)
+                        elif cmd_type == "STOP_EXAM":
+                            self._force_terminate_by_teacher()
+                    except Exception:
+                        pass
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     if self.student_client:
                         self.student_client.stop()
                     self.quit()
-
-                # Window focus / minimization / activation events
-                if event.type in (pygame.WINDOWFOCUSLOST, pygame.WINDOWFOCUSGAINED, pygame.WINDOWMINIMIZED, pygame.WINDOWRESTORED):
-                    changed, msg, duration = self.screen_tracker.update_focus(pygame.key.get_focused())
-                    if changed and self.mode == ApplicationMode.EXAMINE and self.is_network_exam:
-                        if not self.screen_tracker.is_focused:
-                            self.student_client.send_event(EventType.FOCUS_LOST, msg or "Свернул окно симулятора")
-                            self._send_immediate_screenshot()
-                        else:
-                            self.student_client.send_event(EventType.FOCUS_GAINED, msg or "Фокус возвращен")
 
                 # Fullscreen hotkeys: F11 or Alt+Enter
                 if event.type == pygame.KEYDOWN:
@@ -561,20 +738,9 @@ class SimulatorApp:
                 self.active_device.update(dt_ms)
                 self._update_navbar_buttons_state()
 
-                # Focus & Telemetry Update
+                # Telemetry Update
                 now = time.time()
                 if self.mode == ApplicationMode.EXAMINE and self.is_network_exam:
-                    # Periodic active window / focus verification
-                    if now - self.last_focus_check_time >= 0.5:
-                        self.last_focus_check_time = now
-                        changed, msg, duration = self.screen_tracker.update_focus(pygame.key.get_focused())
-                        if changed:
-                            if not self.screen_tracker.is_focused:
-                                self.student_client.send_event(EventType.FOCUS_LOST, msg or "Свернул окно симулятора")
-                                self._send_immediate_screenshot()
-                            else:
-                                self.student_client.send_event(EventType.FOCUS_GAINED, msg or "Фокус возвращен")
-
                     # Heartbeat every 1.5s
                     if now - self.last_heartbeat_time >= 1.5 and self.active_device.current_algorithm:
                         self.last_heartbeat_time = now
@@ -588,16 +754,9 @@ class SimulatorApp:
                             progress_pct=pct,
                             completed_steps=completed,
                             mistakes_count=mistakes,
-                            is_focused=self.screen_tracker.is_focused,
-                            active_window=self.screen_tracker.active_window_title,
                             elapsed_sec=elapsed,
                             score=res.get("score")
                         )
-
-                    # Periodic screenshot every 8.0s
-                    if now - self.last_screenshot_time >= self.screenshot_interval:
-                        self.last_screenshot_time = now
-                        self._send_immediate_screenshot()
 
                 # Training complete check
                 if (
@@ -692,9 +851,6 @@ class SimulatorApp:
                 net_surf = self.badge_font.render(net_str, True, net_col)
                 self.screen.blit(net_surf, (SCREEN_WIDTH - 330, 9))
 
-                if not self.screen_tracker.is_focused:
-                    warn_surf = self.badge_font.render("⚠ ОКНО НЕ В ФОКУСЕ!", True, (239, 68, 68))
-                    self.screen.blit(warn_surf, (SCREEN_WIDTH - 540, 9))
 
             # Fullscreen button in simulation
             self.btn_sim_fullscreen.draw(self.screen)

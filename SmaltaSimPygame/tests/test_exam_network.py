@@ -140,3 +140,67 @@ def test_app_examine_flow(monkeypatch):
     # Should not raise NameError or any exception!
     assert app.active_device is not None or app.active_dialog is not None
 
+def test_action_annotator_and_force_stop():
+    import os
+    os.environ["SDL_VIDEODRIVER"] = "dummy"
+    pygame.init()
+    from network.action_annotator import ActionAnnotator
+    from devices.smalta import create_smalta_device, get_smalta_algorithms
+    from main import SimulatorApp, ApplicationMode
+
+    # 1. ActionAnnotator test
+    annotator = ActionAnnotator()
+    surf = pygame.Surface((1280, 870))
+    dev = create_smalta_device()
+    algos = get_smalta_algorithms()
+    algo = algos[0]
+    dev.apply_algorithm(algo)
+    dev.hint_service.start_training(algo, dev)
+    expected = dev.hint_service.get_current_action()
+
+    # Mistake snapshot
+    jpeg_mistake = annotator.capture_action_snapshot(
+        screen_surface=surf,
+        is_mistake=True,
+        clicked_element_name="lo01p_thumbler_power",
+        device=dev,
+        current_step_idx=0,
+        total_steps=10,
+        expected_action=expected
+    )
+    assert jpeg_mistake is not None
+    assert len(jpeg_mistake) > 100
+    assert jpeg_mistake[:2] == b'\xff\xd8'
+
+    # Correct action snapshot
+    jpeg_correct = annotator.capture_action_snapshot(
+        screen_surface=surf,
+        is_mistake=False,
+        clicked_element_name="lo01p_thumbler_light",
+        device=dev,
+        current_step_idx=0,
+        total_steps=10,
+        expected_action=expected
+    )
+    assert jpeg_correct is not None
+    assert len(jpeg_correct) > 100
+
+    # 2. Force termination by teacher test in SimulatorApp
+    app = SimulatorApp()
+    app.mode = ApplicationMode.EXAMINE
+    app.start_simulation(dev, algo)
+    assert app.active_device is not None
+
+    # Simulate teacher force stop
+    app._force_terminate_by_teacher()
+
+    # Verify:
+    # 1. Network client is stopped
+    assert app.is_network_exam is False
+    # 2. Result dialog is displayed with title indicating teacher stop
+    assert app.active_dialog is not None
+    assert "преподавателем" in app.active_dialog.title.lower()
+    # 3. Only ONE button ("В главное меню"), NO question ("Да/Отмена")!
+    assert len(app.active_dialog.ui_buttons) == 1
+    assert app.active_dialog.ui_buttons[0].text == "В главное меню"
+

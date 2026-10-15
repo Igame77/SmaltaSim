@@ -278,6 +278,11 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
                         st.status = StudentStatus.ACTIVE
                 elif evt["event_type"] == "FINISH":
                     st.status = StudentStatus.FINISHED
+                    details = data.get("details", {})
+                    if details.get("score") is not None:
+                        st.score = int(details["score"])
+                    if details.get("wrong_actions") is not None:
+                        st.mistakes_count = int(details["wrong_actions"])
 
             server_state.broadcast_sse("student_event", {"student_id": sid, "event": evt})
             server_state.broadcast_sse("student_update", st.to_dict())
@@ -351,6 +356,16 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
                         st.status = StudentStatus.ACTIVE
                         st.start_time = time.time()
                         st.pending_commands.append({"type": "START_EXAM"})
+            for st in server_state.students.values():
+                server_state.broadcast_sse("student_update", st.to_dict())
+            self._send_json({"status": "ok"})
+
+        elif path == "/api/exam/stop_all":
+            with server_state.lock:
+                for st in server_state.students.values():
+                    if st.status in (StudentStatus.ACTIVE, StudentStatus.WAITING, StudentStatus.FOCUS_LOST):
+                        st.status = StudentStatus.STOPPED
+                        st.pending_commands.append({"type": "STOP_EXAM"})
             for st in server_state.students.values():
                 server_state.broadcast_sse("student_update", st.to_dict())
             self._send_json({"status": "ok"})
@@ -914,12 +929,12 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       <div class="brand-logo">ВКМ</div>
       <div class="brand-text">
         <h1>Пульт экзаменатора: Комплекс РЭБ / РЛС</h1>
-        <p>Мониторинг курсантов в реальном времени • Контроль окон • Скриншоты</p>
+        <p>Мониторинг курсантов в реальном времени • Детализация ошибок • Аннотированные снимки (BBox)</p>
       </div>
     </div>
     <div class="header-actions">
       {ip_badges_html}
-      <button class="btn btn-success" onclick="startAllExams()">▶ Общий старт</button>
+      <button id="btn-toggle-all" class="btn btn-success" onclick="toggleAllExams()">▶ Общий старт</button>
       <a href="/api/export/csv" class="btn btn-outline" download>📥 Скачать ведомость (CSV)</a>
       <button class="btn btn-danger" onclick="clearExamData()">Очистить список</button>
     </div>
@@ -935,8 +950,8 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       <span class="value" style="color: #6ee7b7;" id="stat-active">0</span>
     </div>
     <div class="stat-card">
-      <span class="label">Свернули симулятор (Внимание)</span>
-      <span class="value" style="color: #fca5a5;" id="stat-focus-lost">0</span>
+      <span class="label">Ошибок зафиксировано</span>
+      <span class="value" style="color: #fca5a5;" id="stat-mistakes">0</span>
     </div>
     <div class="stat-card">
       <span class="label">Завершили экзамен</span>
@@ -969,8 +984,9 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
         <button class="modal-close" onclick="closeModal()">&times;</button>
       </div>
       <div class="modal-tabs">
-        <div class="modal-tab active" id="tab-log" onclick="switchModalTab('log')">Журнал действий и ошибок</div>
-        <div class="modal-tab" id="tab-shots" onclick="switchModalTab('shots')">Галерея скриншотов</div>
+        <div class="modal-tab active" id="tab-log" onclick="switchModalTab('log')">📋 Общий лог</div>
+        <div class="modal-tab" id="tab-mistakes" onclick="switchModalTab('mistakes')">⚠️ Лог ошибок</div>
+        <div class="modal-tab" id="tab-shots" onclick="switchModalTab('shots')">📸 Галерея снимков (BBox)</div>
       </div>
       <div class="modal-body" id="modal-body">
         <!-- Контент таба -->
@@ -1055,19 +1071,32 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
       let total = list.length;
       let active = 0;
-      let focusLost = 0;
       let finished = 0;
+      let totalMistakes = 0;
 
       list.forEach(s => {{
-        if (s.status === 'ACTIVE') active++;
-        else if (s.status === 'FOCUS_LOST') focusLost++;
+        if (s.status === 'ACTIVE' || s.status === 'FOCUS_LOST') active++;
         else if (s.status === 'FINISHED' || s.status === 'STOPPED') finished++;
+        totalMistakes += (s.mistakes_count || 0);
       }});
 
       document.getElementById('stat-total').innerText = total;
       document.getElementById('stat-active').innerText = active;
-      document.getElementById('stat-focus-lost').innerText = focusLost;
+      const elMistakes = document.getElementById('stat-mistakes');
+      if (elMistakes) elMistakes.innerText = totalMistakes;
       document.getElementById('stat-finished').innerText = finished;
+
+      // Динамическое переключение кнопки Общий старт / Общий стоп
+      const btnToggle = document.getElementById('btn-toggle-all');
+      if (btnToggle) {{
+        if (active > 0) {{
+          btnToggle.className = 'btn btn-danger';
+          btnToggle.innerText = '⏹ Общий стоп';
+        }} else {{
+          btnToggle.className = 'btn btn-success';
+          btnToggle.innerText = '▶ Общий старт';
+        }}
+      }}
 
       if (total === 0) {{
         grid.style.display = 'none';
@@ -1087,24 +1116,18 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
     function createStudentCard(s) {{
       const card = document.createElement('div');
-      card.className = 'student-card' + (s.status === 'FOCUS_LOST' ? ' focus-lost' : '');
+      card.className = 'student-card';
 
       let statusClass = 'status-waiting';
       let statusText = 'Ожидает';
       if (s.status === 'ACTIVE') {{ statusClass = 'status-active'; statusText = 'Сдает'; }}
-      else if (s.status === 'FOCUS_LOST') {{ statusClass = 'status-focus-lost'; statusText = 'Внимание: свернул'; }}
       else if (s.status === 'FINISHED') {{ statusClass = 'status-finished'; statusText = 'Завершил'; }}
       else if (s.status === 'STOPPED') {{ statusClass = 'status-stopped'; statusText = 'Остановлен'; }}
 
       const shotUrl = s.last_screenshot_url || '';
       const shotHtml = shotUrl
         ? `<img src="${{shotUrl}}" alt="Экран студента" onclick="openShotModal('${{shotUrl}}', '${{s.full_name}}')">`
-        : `<div style="color: var(--text-dim); font-size: 13px;">Нет снимка экрана</div>`;
-
-      let alertWindowHtml = '';
-      if (s.status === 'FOCUS_LOST' && s.active_window) {{
-        alertWindowHtml = `<div class="alert-window-name">⚠ Активно: ${{s.active_window}}</div>`;
-      }}
+        : `<div style="color: var(--text-dim); font-size: 13px;">Ожидание первого действия</div>`;
 
       const elapsedMin = Math.floor(s.elapsed_sec / 60);
       const elapsedSec = Math.floor(s.elapsed_sec % 60);
@@ -1125,7 +1148,6 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
         <div class="card-preview">
           ${{shotHtml}}
-          ${{alertWindowHtml}}
           <div class="preview-overlay-info">
             <span>${{s.device_name}}</span>
             <span>${{s.last_screenshot_time ? Math.round(Date.now()/1000 - s.last_screenshot_time) + ' сек назад' : 'Ожидание'}}</span>
@@ -1153,8 +1175,8 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
               <div class="lbl">Время</div>
             </div>
             <div class="metric-item">
-              <div class="val" style="color: ${{s.focus_lost_count > 0 ? '#fca5a5' : '#fff'}}">${{s.focus_lost_count}}</div>
-              <div class="lbl">Отвлечений</div>
+              <div class="val" style="color: #93c5fd;">${{s.completed_steps}}/${{s.total_steps}}</div>
+              <div class="lbl">Шагов</div>
             </div>
           </div>
         </div>
@@ -1163,7 +1185,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
           ${{s.status === 'WAITING' ? `<button class="btn btn-success btn-sm" onclick="sendStudentCommand('${{s.student_id}}', 'START_EXAM')">▶ Начать</button>` : ''}}
           <button class="btn btn-outline btn-sm" onclick="sendStudentCommand('${{s.student_id}}', 'REQUEST_SCREENSHOT')">📸 Снимок</button>
           <button class="btn btn-primary btn-sm" onclick="openStudentModal('${{s.student_id}}')">📋 Журнал</button>
-          ${{s.status === 'ACTIVE' || s.status === 'FOCUS_LOST' ? `<button class="btn btn-danger btn-sm" onclick="sendStudentCommand('${{s.student_id}}', 'STOP_EXAM')">⏹ Стоп</button>` : ''}}
+          ${{s.status === 'ACTIVE' || s.status === 'FOCUS_LOST' ? `<button class="btn btn-danger btn-sm" onclick="stopStudentExam('${{s.student_id}}', '${{s.full_name}}')">⏹ Стоп</button>` : ''}}
         </div>
       `;
       return card;
@@ -1177,9 +1199,23 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       }});
     }}
 
-    function startAllExams() {{
-      if (confirm('Начать экзамен для всех ожидающих курсантов?')) {{
-        fetch('/api/exam/start_all', {{ method: 'POST' }});
+    function stopStudentExam(studentId, studentName) {{
+      if (confirm(`Принудительно завершить экзамен для курсанта ${{studentName}}?\nТекущий прогресс и оценка будут сохранены.`)) {{
+        sendStudentCommand(studentId, 'STOP_EXAM');
+      }}
+    }}
+
+    function toggleAllExams() {{
+      const list = Object.values(studentsMap);
+      const hasActive = list.some(s => s.status === 'ACTIVE' || s.status === 'FOCUS_LOST');
+      if (hasActive) {{
+        if (confirm('Принудительно завершить экзамен для всех сдающих курсантов?\nТекущий прогресс и оценки будут сохранены.')) {{
+          fetch('/api/exam/stop_all', {{ method: 'POST' }});
+        }}
+      }} else {{
+        if (confirm('Начать экзамен для всех ожидающих курсантов?')) {{
+          fetch('/api/exam/start_all', {{ method: 'POST' }});
+        }}
       }}
     }}
 
@@ -1211,31 +1247,38 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
     function switchModalTab(tab) {{
       currentModalTab = tab;
       document.getElementById('tab-log').classList.toggle('active', tab === 'log');
+      document.getElementById('tab-mistakes').classList.toggle('active', tab === 'mistakes');
       document.getElementById('tab-shots').classList.toggle('active', tab === 'shots');
 
-      if (tab === 'log') {{
-        loadStudentEvents(currentModalStudentId);
-      }} else {{
+      if (tab === 'shots') {{
         loadStudentScreenshots(currentModalStudentId);
+      }} else {{
+        loadStudentEvents(currentModalStudentId, tab === 'mistakes');
       }}
     }}
 
     function updateModalContent() {{
-      if (currentModalTab === 'log') {{
-        loadStudentEvents(currentModalStudentId);
-      }} else {{
+      if (currentModalTab === 'shots') {{
         loadStudentScreenshots(currentModalStudentId);
+      }} else {{
+        loadStudentEvents(currentModalStudentId, currentModalTab === 'mistakes');
       }}
     }}
 
-    function loadStudentEvents(studentId) {{
+    function loadStudentEvents(studentId, filterMistakes = false) {{
       fetch(`/api/students/${{studentId}}/events`)
         .then(r => r.json())
         .then(data => {{
           const body = document.getElementById('modal-body');
-          const events = data.events || [];
+          let events = data.events || [];
+          if (filterMistakes) {{
+            events = events.filter(e => e.is_mistake);
+          }}
           if (events.length === 0) {{
-            body.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 40px;">Журнал пуст</div>';
+            const emptyTxt = filterMistakes
+              ? 'Ошибок не зафиксировано (отличная работа)'
+              : 'Журнал пуст';
+            body.innerHTML = `<div style="color: var(--text-dim); text-align: center; padding: 40px;">${{emptyTxt}}</div>`;
             return;
           }}
           let html = '<div class="log-list">';
@@ -1243,13 +1286,15 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
             const d = new Date(evt.timestamp * 1000);
             const timeStr = d.toLocaleTimeString();
             let cls = 'log-item';
-            if (evt.is_mistake) cls += ' mistake';
-            if (evt.event_type === 'FOCUS_LOST') cls += ' focus-lost';
-
+            let badge = evt.event_type;
+            if (evt.is_mistake) {{
+              cls += ' mistake';
+              badge = 'ОШИБКА';
+            }}
             html += `
               <div class="${{cls}}">
                 <div>
-                  <strong>[${{evt.event_type}}]</strong> ${{evt.message}}
+                  <strong>[${{badge}}]</strong> ${{evt.message}}
                 </div>
                 <span style="color: var(--text-dim); margin-left: 16px;">${{timeStr}}</span>
               </div>

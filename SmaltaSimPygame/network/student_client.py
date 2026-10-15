@@ -30,8 +30,10 @@ class StudentClient:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._queue = queue.Queue()
+        self.incoming_commands = queue.Queue()
+        self._cached_telemetry: Dict[str, Any] = {}
         self._last_heartbeat_time = 0.0
-        self._heartbeat_interval = 1.5
+        self._heartbeat_interval = 1.0
 
         # Callbacks
         self.on_command_callback: Optional[Callable[[str, Any], None]] = None
@@ -204,35 +206,34 @@ class StudentClient:
 
     def queue_heartbeat(
         self,
-        progress_pct: float,
-        completed_steps: int,
-        mistakes_count: int,
-        is_focused: bool,
-        active_window: str,
-        elapsed_sec: float,
+        progress_pct: float = 0.0,
+        completed_steps: int = 0,
+        mistakes_count: int = 0,
+        elapsed_sec: float = 0.0,
         current_action_desc: str = "",
-        score: Optional[int] = None
+        score: Optional[int] = None,
+        **kwargs
     ):
         if not self.student_id:
             return
-        self._queue.put(("heartbeat", {
+        data = {
             "student_id": self.student_id,
             "progress_pct": progress_pct,
             "completed_steps": completed_steps,
             "mistakes_count": mistakes_count,
-            "is_focused": is_focused,
-            "active_window": active_window,
             "elapsed_sec": elapsed_sec,
             "current_action_desc": current_action_desc,
             "score": score
-        }))
+        }
+        self._cached_telemetry = data
+        self._queue.put(("heartbeat", data))
 
     def _worker_loop(self):
         while self._running:
             try:
                 # 1. Обработка очереди исходящих сообщений
                 try:
-                    task_type, payload = self._queue.get(timeout=0.2)
+                    task_type, payload = self._queue.get(timeout=0.25)
                     if task_type == "event":
                         res = self._http_post(f"/api/students/{self.student_id}/event", payload)
                         if res and not self.is_connected:
@@ -240,6 +241,7 @@ class StudentClient:
                             if self.on_connection_change:
                                 self.on_connection_change(True)
                     elif task_type == "heartbeat":
+                        self._last_heartbeat_time = time.time()
                         res = self._http_post(f"/api/students/{self.student_id}/heartbeat", payload)
                         if res:
                             self._handle_server_response(res)
@@ -259,6 +261,20 @@ class StudentClient:
                 except queue.Empty:
                     pass
 
+                # 2. Автоматический опрос heartbeat и команд каждые 1.0 сек
+                now = time.time()
+                if self.student_id and (now - self._last_heartbeat_time >= self._heartbeat_interval):
+                    self._last_heartbeat_time = now
+                    payload = dict(self._cached_telemetry)
+                    payload["student_id"] = self.student_id
+                    res = self._http_post(f"/api/students/{self.student_id}/heartbeat", payload, timeout=2.0)
+                    if res:
+                        self._handle_server_response(res)
+                        if not self.is_connected:
+                            self.is_connected = True
+                            if self.on_connection_change:
+                                self.on_connection_change(True)
+
             except Exception:
                 time.sleep(0.5)
 
@@ -270,6 +286,8 @@ class StudentClient:
 
             if cmd_type == "START_EXAM":
                 self.is_exam_started_by_server = True
+
+            self.incoming_commands.put((cmd_type, payload))
 
             if self.on_command_callback:
                 try:

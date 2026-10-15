@@ -9,6 +9,7 @@ class DeviceBase:
         self.name = name
         self.readable_name = readable_name
         self.pages = pages
+        self.first_page_key = first_page_key
         self.current_page_key = first_page_key
         
         self.elements: List[ElementBase] = []
@@ -83,12 +84,15 @@ class DeviceBase:
 
     def apply_algorithm(self, algorithm: Algorithm):
         self.current_algorithm = algorithm
+        self.current_page_key = self.first_page_key
         self.history_service.reset()
         self.hint_service.reset()
 
-        # Cancel any running delayed dependencies
+        # Cancel any running delayed dependencies and reset element interaction states
         for el in self.elements:
             el.cancel_dependencies()
+            el.is_hint_open = False
+            el.is_enabled = True
 
         # Set initial values
         for el in self.elements:
