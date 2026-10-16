@@ -424,7 +424,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
                     # Регулярный keep-alive пинг для исключения таймаута TCP
                     self.wfile.write(b": keep-alive\n\n")
                     self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass
         finally:
             with server_state.lock:
@@ -454,6 +454,74 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(csv_bytes)
 
     def _serve_dashboard_html(self):
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
+        open_modal_id = qs.get("open_modal", [None])[0]
+        open_tab = qs.get("tab", ["log"])[0]
+
+        modal_backdrop_class = "modal-backdrop"
+        modal_title_text = "Иванов И.И. (Гр. 401)"
+        modal_sub_text = "ПК-01 • Смальта"
+        tab_log_class = "modal-tab active"
+        tab_mistakes_class = "modal-tab"
+        tab_shots_class = "modal-tab"
+        modal_body_html = ""
+
+        if open_modal_id:
+            st = server_state.get_student(open_modal_id)
+            if st:
+                modal_backdrop_class = "modal-backdrop active"
+                modal_title_text = f"{st.full_name} ({st.group})"
+                modal_sub_text = f"Рабочее место: {st.pc_name} • Изделие: {st.device_name} • Билет: {st.algorithm_name}"
+                if open_tab == "shots":
+                    tab_log_class = "modal-tab"
+                    tab_shots_class = "modal-tab active"
+                    shots = list(st.screenshots)
+                    if not shots:
+                        modal_body_html = '<div style="color: var(--text-dim); text-align: center; padding: 40px;">Скриншотов пока нет</div>'
+                    else:
+                        shots_items = []
+                        for shot in reversed(shots):
+                            t_str = time.strftime('%H:%M:%S', time.localtime(shot['timestamp']))
+                            win = f" • {shot['active_window']}" if shot.get('active_window') else ""
+                            shots_items.append(f"""
+                            <div class="shot-card" onclick="openShotModal('{shot['url']}', '{t_str}{win}')">
+                              <img src="{shot['url']}">
+                              <div class="shot-info">{t_str}{win}</div>
+                            </div>
+                            """)
+                        modal_body_html = f'<div class="shots-grid">{"".join(shots_items)}</div>'
+                else:
+                    tab_log_class = "modal-tab active"
+                    tab_shots_class = "modal-tab"
+                    events = list(st.events)
+                    if not events:
+                        modal_body_html = '<div style="color: var(--text-dim); text-align: center; padding: 40px;">Журнал пуст</div>'
+                    else:
+                        ev_items = []
+                        for evt in reversed(events):
+                            t_str = time.strftime('%H:%M:%S', time.localtime(evt['timestamp']))
+                            cls = "log-item"
+                            badge = evt['event_type']
+                            if evt.get('is_mistake'):
+                                cls += " mistake"
+                                badge = "ОШИБКА"
+                            elif evt['event_type'] == "FOCUS_LOST":
+                                cls += " focus-lost"
+                                badge = "ВНИМАНИЕ"
+                            ev_items.append(f"""
+                            <div class="{cls}">
+                              <div>
+                                <span style="font-weight: 700; margin-right: 8px;">[{badge}]</span>
+                                <span>{evt['message']}</span>
+                              </div>
+                              <span style="color: var(--text-dim); margin-left: 12px; white-space: nowrap;">{t_str}</span>
+                            </div>
+                            """)
+                        modal_body_html = f'<div class="log-list">{"".join(ev_items)}</div>'
+
+        all_students_json = json.dumps(server_state.get_all_students_list(), ensure_ascii=False)
+
         ifaces = get_local_interfaces()
         lan_badges = []
         for iface in ifaces:
@@ -1001,22 +1069,22 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
   </main>
 
   <!-- Модальное окно деталей студента -->
-  <div class="modal-backdrop" id="modal-backdrop" onclick="closeModal(event)">
+  <div class="{modal_backdrop_class}" id="modal-backdrop" onclick="closeModal(event)">
     <div class="modal-dialog" onclick="event.stopPropagation()">
       <div class="modal-header">
         <div>
-          <div class="modal-title" id="modal-title">Иванов И.И. (Гр. 401)</div>
-          <div style="font-size: 12px; color: var(--text-dim);" id="modal-sub">ПК-01 • Смальта</div>
+          <div class="modal-title" id="modal-title">{modal_title_text}</div>
+          <div style="font-size: 12px; color: var(--text-dim);" id="modal-sub">{modal_sub_text}</div>
         </div>
         <button class="modal-close" onclick="closeModal()">&times;</button>
       </div>
       <div class="modal-tabs">
-        <div class="modal-tab active" id="tab-log" onclick="switchModalTab('log')">📋 Общий лог</div>
-        <div class="modal-tab" id="tab-mistakes" onclick="switchModalTab('mistakes')">⚠️ Лог ошибок</div>
-        <div class="modal-tab" id="tab-shots" onclick="switchModalTab('shots')">📸 Галерея снимков (BBox)</div>
+        <div class="{tab_log_class}" id="tab-log" onclick="switchModalTab('log')">📋 Общий лог</div>
+        <div class="{tab_mistakes_class}" id="tab-mistakes" onclick="switchModalTab('mistakes')">⚠️ Лог ошибок</div>
+        <div class="{tab_shots_class}" id="tab-shots" onclick="switchModalTab('shots')">📸 Галерея снимков (BBox)</div>
       </div>
       <div class="modal-body" id="modal-body">
-        <!-- Контент таба -->
+        {modal_body_html}
       </div>
     </div>
   </div>
@@ -1034,9 +1102,20 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
   <script>
     let studentsMap = {{}};
+    try {{
+      const initList = {all_students_json};
+      if (Array.isArray(initList)) {{
+        initList.forEach(s => studentsMap[s.student_id] = s);
+      }}
+    }} catch(e) {{}}
     let currentModalStudentId = null;
-    let currentModalTab = 'log';
+    let currentModalTab = '{open_tab}';
     let sseActive = false;
+
+    // Первичный рендер из встроенного состояния сервера
+    if (Object.keys(studentsMap).length > 0) {{
+      setTimeout(renderStudents, 0);
+    }}
 
     // 1. Мгновенная синхронизация через REST (не ждет SSE-рукопожатия)
     async function syncStudentsREST() {{
