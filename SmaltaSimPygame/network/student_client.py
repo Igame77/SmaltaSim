@@ -7,12 +7,18 @@ import urllib.error
 import queue
 from typing import Optional, Callable, Dict, Any, List
 
+import select
+import concurrent.futures
+
 from network.exam_protocol import (
     DEFAULT_SERVER_PORT, DEFAULT_DISCOVERY_PORT,
     DISCOVERY_MAGIC_REQUEST, DISCOVERY_MAGIC_RESPONSE,
     StudentStatus, EventType, serialize_json, deserialize_json
 )
-from network.network_utils import get_local_interfaces, ping_server
+from network.network_utils import (
+    get_local_interfaces, ping_server,
+    get_arp_cached_ips, get_subnet_candidate_ips
+)
 
 class StudentClient:
     def __init__(self, server_ip: str = "127.0.0.1", server_port: int = DEFAULT_SERVER_PORT):
@@ -40,10 +46,10 @@ class StudentClient:
         self.on_connection_change: Optional[Callable[[bool], None]] = None
 
     @staticmethod
-    def discover_server(timeout: float = 1.2, port: int = DEFAULT_DISCOVERY_PORT) -> Optional[tuple[str, int]]:
+    def discover_server(timeout: float = 1.0, port: int = DEFAULT_DISCOVERY_PORT) -> Optional[tuple[str, int]]:
         """
-        Ищет сервер преподавателя в локальной сети через UDP Broadcast
-        по всем активным сетевым интерфейсам.
+        Ищет сервер преподавателя в локальной сети через параллельный UDP Broadcast
+        с использованием select.select и верификацией полученного адреса.
         """
         sockets = []
         msg = DISCOVERY_MAGIC_REQUEST.encode('utf-8')
@@ -53,40 +59,75 @@ class StudentClient:
                 try:
                     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                     s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                    s.settimeout(timeout)
+                    s.setblocking(False)
                     s.bind((iface['ip'], 0))
-                    s.sendto(msg, (iface['broadcast'], port))
-                    s.sendto(msg, ('255.255.255.255', port))
+                    # Отправка на broadcast подсети и общий broadcast
+                    try:
+                        s.sendto(msg, (iface['broadcast'], port))
+                    except Exception:
+                        pass
+                    try:
+                        s.sendto(msg, ('255.255.255.255', port))
+                    except Exception:
+                        pass
+                    # Если есть шлюз, также направляем запрос напрямую на него
+                    gw = iface.get('gw')
+                    if gw and gw != '0.0.0.0':
+                        try:
+                            s.sendto(msg, (gw, port))
+                        except Exception:
+                            pass
                     sockets.append(s)
                 except Exception:
                     pass
 
-            # Запасной общий сокет
+            # Запасной сокет по умолчанию
             try:
                 s_def = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 s_def.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                s_def.settimeout(timeout)
-                s_def.sendto(msg, ('<broadcast>', port))
-                s_def.sendto(msg, ('255.255.255.255', port))
+                s_def.setblocking(False)
+                try:
+                    s_def.sendto(msg, ('<broadcast>', port))
+                except Exception:
+                    pass
+                try:
+                    s_def.sendto(msg, ('255.255.255.255', port))
+                except Exception:
+                    pass
                 sockets.append(s_def)
             except Exception:
                 pass
 
             deadline = time.time() + timeout
             while time.time() < deadline:
-                for s in sockets:
+                remaining = max(0.05, deadline - time.time())
+                rlist, _, _ = select.select(sockets, [], [], min(remaining, 0.25))
+                for s in rlist:
                     try:
-                        s.settimeout(0.15)
                         data, addr = s.recvfrom(1024)
                         resp = data.decode('utf-8', errors='ignore').strip()
                         if resp.startswith(DISCOVERY_MAGIC_RESPONSE) or resp.startswith("SmaltaSim_TEACHER_BEACON"):
                             parts = resp.split(':')
-                            found_ip = addr[0]
                             found_port = DEFAULT_SERVER_PORT
+                            cand_ips = []
                             if len(parts) >= 3:
-                                found_ip = parts[1]
-                                found_port = int(parts[2])
-                            return (found_ip, found_port)
+                                cand_ips.append(parts[1])
+                                try:
+                                    found_port = int(parts[2])
+                                except Exception:
+                                    pass
+                            if len(parts) >= 4 and parts[3]:
+                                for extra_ip in parts[3].split(','):
+                                    if extra_ip and extra_ip not in cand_ips:
+                                        cand_ips.append(extra_ip)
+                            # Физический адрес источника пакета
+                            if addr[0] not in cand_ips:
+                                cand_ips.append(addr[0])
+
+                            # Верифицируем IP через HTTP ping
+                            for candidate in cand_ips:
+                                if ping_server(candidate, found_port, timeout=0.35):
+                                    return (candidate, found_port)
                     except Exception:
                         continue
         finally:
@@ -95,6 +136,101 @@ class StudentClient:
                     s.close()
                 except Exception:
                     pass
+        return None
+
+    @classmethod
+    def comprehensive_server_discovery(
+        cls,
+        current_ip: Optional[str] = None,
+        on_status: Optional[Callable[[str], None]] = None
+    ) -> Optional[tuple[str, int]]:
+        """
+        Многоуровневый интеллектуальный поиск сервера преподавателя:
+        1. Мгновенная проверка текущего/сохраненного IP и localhost (5-50 мс)
+        2. Быстрый параллельный UDP Broadcast (0.8 с)
+        3. Проверка активных устройств из таблицы ARP и шлюзов (0.3 с)
+        4. Быстрое многопоточное сканирование локальной подсети /24 (1.0-1.2 с)
+        """
+        # Уровень 1: Проверка уже введенного или сохраненного IP
+        if on_status:
+            on_status("Проверка сохраненного адреса...")
+        if current_ip and current_ip.strip():
+            c_ip = current_ip.strip()
+            if ping_server(c_ip, DEFAULT_SERVER_PORT, timeout=0.35):
+                return (c_ip, DEFAULT_SERVER_PORT)
+
+        # Проверка локального сервера на том же ПК
+        if ping_server("127.0.0.1", DEFAULT_SERVER_PORT, timeout=0.15):
+            return ("127.0.0.1", DEFAULT_SERVER_PORT)
+
+        # Уровень 2: UDP Broadcast
+        if on_status:
+            on_status("Поиск сервера в локальной сети (UDP)...")
+        udp_res = cls.discover_server(timeout=0.9)
+        if udp_res:
+            return udp_res
+
+        # Уровень 3: Таблица ARP и сетевые шлюзы
+        if on_status:
+            on_status("Опрос активных устройств сети...")
+        ifaces = get_local_interfaces()
+        tier3_candidates = []
+        for iface in ifaces:
+            gw = iface.get("gw")
+            if gw and gw != '0.0.0.0' and gw not in tier3_candidates:
+                tier3_candidates.append(gw)
+
+        # Добавляем из ARP только адреса той же локальной подсети
+        local_prefixes = tuple(".".join(iface["ip"].split(".")[:3]) + "." for iface in ifaces if not iface.get("is_virtual"))
+        for arp_ip in get_arp_cached_ips():
+            if arp_ip.startswith(local_prefixes) and arp_ip not in tier3_candidates:
+                tier3_candidates.append(arp_ip)
+
+        if tier3_candidates:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(25, len(tier3_candidates))) as executor:
+                future_to_ip = {
+                    executor.submit(ping_server, ip, DEFAULT_SERVER_PORT, 0.35): ip
+                    for ip in tier3_candidates
+                }
+                for future in concurrent.futures.as_completed(future_to_ip):
+                    if future.result():
+                        return (future_to_ip[future], DEFAULT_SERVER_PORT)
+
+        # Уровень 4: Многопоточное сканирование локальной подсети /24
+        if on_status:
+            on_status("Сканирование локальной подсети...")
+        scanned_subnets = set()
+        for iface in ifaces:
+            if iface.get("is_virtual"):
+                continue
+            iface_ip = iface["ip"]
+            mask = iface.get("mask", "255.255.255.0")
+            subnet_key = ".".join(iface_ip.split(".")[:3])
+            if subnet_key in scanned_subnets:
+                continue
+            scanned_subnets.add(subnet_key)
+
+            candidates = get_subnet_candidate_ips(iface_ip, mask, max_hosts=512)
+            # Исключаем уже проверенные на предыдущих уровнях
+            candidates = [ip for ip in candidates if ip not in tier3_candidates]
+            if not candidates:
+                continue
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=80) as executor:
+                future_to_ip = {
+                    executor.submit(ping_server, ip, DEFAULT_SERVER_PORT, 0.35): ip
+                    for ip in candidates
+                }
+                for future in concurrent.futures.as_completed(future_to_ip):
+                    try:
+                        if future.result():
+                            # Найден сервер преподавателя!
+                            found_ip = future_to_ip[future]
+                            executor.shutdown(wait=False, cancel_futures=True)
+                            return (found_ip, DEFAULT_SERVER_PORT)
+                    except Exception:
+                        pass
+
         return None
 
     def check_connection(self) -> bool:

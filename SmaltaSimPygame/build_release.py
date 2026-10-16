@@ -14,6 +14,13 @@ ROOT_DIR = BASE_DIR.parent
 
 def clean():
     print("--- Очистка каталогов сборки ---")
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/F", "/IM", "SmaltaSim.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "TeacherServer.exe"], capture_output=True)
+            subprocess.run(["taskkill", "/F", "/IM", "SmaltaSimStandalone.exe"], capture_output=True)
+        except Exception:
+            pass
     for d in [BUILD_DIR, DIST_DIR]:
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)

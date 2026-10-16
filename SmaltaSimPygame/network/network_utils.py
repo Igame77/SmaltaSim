@@ -68,10 +68,12 @@ def get_local_interfaces() -> List[Dict[str, Any]]:
 
                         if ip and ip != '0.0.0.0' and not ip.startswith('127.'):
                             desc_lower = desc.lower()
+                            # Windows Mobile Hotspot uses "Microsoft Wi-Fi Direct Virtual Adapter"
+                            is_hotspot = ('wi-fi direct' in desc_lower) or ('direct' in desc_lower and 'wi-fi' in desc_lower) or ip.startswith('192.168.137.')
                             is_virtual = False
-                            if any(v in desc_lower for v in [
+                            if not is_hotspot and any(v in desc_lower for v in [
                                 'virtual', 'hyper-v', 'vmware', 'vbox', 'tunnel',
-                                'tap', 'happ', 'xray', 'wsl', 'loopback', 'vethernet'
+                                'tap', 'happ', 'xray', 'wsl', 'loopback', 'vethernet', 'tailscale', 'zerotier'
                             ]):
                                 is_virtual = True
                             if ip.startswith('169.254.'):
@@ -157,14 +159,77 @@ def get_primary_lan_ip() -> str:
         return ifaces[0]["ip"]
     return "127.0.0.1"
 
-def ping_server(ip: str, port: int = 8000, timeout: float = 1.0) -> bool:
+def ping_server(ip: str, port: int = 8000, timeout: float = 0.8) -> bool:
     """
-    Проверяет доступность сервера преподавателя по HTTP /api/ping.
+    Проверяет доступность сервера преподавателя по TCP/HTTP /api/ping.
+    Валидирует, что ответ возвращает именно VkmExamServer.
     """
+    if not ip:
+        return False
+    # Быстрая проверка TCP порта
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((ip, port))
+        s.close()
+    except Exception:
+        return False
+
+    # HTTP проверка заголовка/тела
     try:
         url = f"http://{ip}:{port}/api/ping"
         req = urllib.request.Request(url, headers={"User-Agent": "SmaltaSim-Client"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status == 200
+            if resp.status == 200:
+                body = resp.read(256).decode('utf-8', errors='ignore')
+                return ("VkmExamServer" in body) or ("status" in body)
+            return False
     except Exception:
         return False
+
+def get_arp_cached_ips(filter_prefix: Optional[str] = None) -> List[str]:
+    """
+    Возвращает список актуальных IP-адресов устройств в локальной сети из таблицы ARP Windows.
+    Позволяет мгновенно обнаружить сервер преподавателя без длительного сканирования подсети.
+    """
+    import subprocess
+    import re
+    found_ips = []
+    try:
+        res = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=1.5)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                line = line.strip()
+                match = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', line)
+                if match:
+                    ip = match.group(1)
+                    # Исключаем широковещательные, мультикаст и спец-адреса
+                    if ip.startswith(('224.', '239.', '255.', '127.', '0.')) or ip.endswith('.255'):
+                        continue
+                    if filter_prefix and not ip.startswith(filter_prefix):
+                        continue
+                    if ip not in found_ips:
+                        found_ips.append(ip)
+    except Exception:
+        pass
+    return found_ips
+
+def get_subnet_candidate_ips(ip: str, mask: str = "255.255.255.0", max_hosts: int = 512) -> List[str]:
+    """
+    Генерирует список IP-адресов для сканирования локальной подсети (/24 или /23).
+    """
+    try:
+        net = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
+        if net.num_addresses > max_hosts:
+            # Если маска слишком широкая (/16), сужаем до /24 вокруг текущего IP
+            parts = ip.split('.')
+            if len(parts) == 4:
+                net = ipaddress.IPv4Network(f"{parts[0]}.{parts[1]}.{parts[2]}.0/24", strict=False)
+        hosts = [str(h) for h in net.hosts() if str(h) != ip]
+        return hosts
+    except Exception:
+        parts = ip.split('.')
+        if len(parts) == 4:
+            base = f"{parts[0]}.{parts[1]}.{parts[2]}"
+            return [f"{base}.{i}" for i in range(1, 255) if f"{base}.{i}" != ip]
+        return []

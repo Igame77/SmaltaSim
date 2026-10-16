@@ -185,42 +185,27 @@ class StudentAuthDialog:
             pass
 
     def start_auto_discovery(self):
-        self.status_msg = "Поиск сервера в локальной сети..."
+        self.status_msg = "Поиск сервера в сети..."
         self.status_color = (245, 158, 11)
 
+        def update_status(text: str):
+            self.status_msg = text
+
         def discover_worker():
-            # 1. Сначала пробуем UDP broadcast автопоиск
-            res = StudentClient.discover_server(timeout=1.5)
+            cur_ip = self.f_server_ip.value.strip()
+            res = StudentClient.comprehensive_server_discovery(current_ip=cur_ip, on_status=update_status)
             if res:
                 ip, port = res
                 self.f_server_ip.value = ip
                 self.client.set_server(ip, port)
                 self.server_found = True
+                self._save_profile()
                 self.status_msg = f"[OK] Сервер преподавателя найден: {ip}:{port}"
                 self.status_color = (52, 211, 153)
-                return
-
-            # 2. Если UDP broadcast не ответил, проверяем IP, уже введенный в поле (или 127.0.0.1)
-            cur_ip = self.f_server_ip.value.strip() or "127.0.0.1"
-            if ping_server(cur_ip, DEFAULT_SERVER_PORT, timeout=0.8):
-                self.f_server_ip.value = cur_ip
-                self.client.set_server(cur_ip, DEFAULT_SERVER_PORT)
-                self.server_found = True
-                self.status_msg = f"[OK] Связь с сервером подтверждена: {cur_ip}:{DEFAULT_SERVER_PORT}"
-                self.status_color = (52, 211, 153)
-                return
-
-            if cur_ip != "127.0.0.1" and ping_server("127.0.0.1", DEFAULT_SERVER_PORT, timeout=0.5):
-                self.f_server_ip.value = "127.0.0.1"
-                self.client.set_server("127.0.0.1", DEFAULT_SERVER_PORT)
-                self.server_found = True
-                self.status_msg = f"[OK] Локальный сервер найден: 127.0.0.1:{DEFAULT_SERVER_PORT}"
-                self.status_color = (52, 211, 153)
-                return
-
-            self.server_found = False
-            self.status_msg = "Сервер не найден автоматически (введите IP преподавателя вручную)"
-            self.status_color = (245, 158, 11)
+            else:
+                self.server_found = False
+                self.status_msg = "Сервер не найден в сети (введите IP преподавателя вручную)"
+                self.status_color = (245, 158, 11)
 
         t = threading.Thread(target=discover_worker, daemon=True)
         t.start()
@@ -233,9 +218,10 @@ class StudentAuthDialog:
         self.status_color = (245, 158, 11)
 
         def ping_worker():
-            if ping_server(target_ip, DEFAULT_SERVER_PORT, timeout=1.2):
+            if ping_server(target_ip, DEFAULT_SERVER_PORT, timeout=1.0):
                 self.client.set_server(target_ip, DEFAULT_SERVER_PORT)
                 self.server_found = True
+                self._save_profile()
                 self.status_msg = f"[OK] Связь с сервером подтверждена: {target_ip}:{DEFAULT_SERVER_PORT}"
                 self.status_color = (52, 211, 153)
             else:

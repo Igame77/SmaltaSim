@@ -1457,27 +1457,42 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: int = DEFAULT_DISCOVERY_PORT):
-    # 1. Слушатель запросов на поиск
+    # 1. Отказоустойчивый слушатель запросов на поиск
     def listener():
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind(('', disc_port))
-            while True:
-                data, addr = s.recvfrom(1024)
-                text = data.decode('utf-8', errors='ignore').strip()
-                if text == DISCOVERY_MAGIC_REQUEST:
-                    client_ip = addr[0]
-                    reply_ip = get_best_ip_for_peer(client_ip) or get_primary_lan_ip()
-                    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{reply_ip}:{port}".encode('utf-8')
-                    s.sendto(resp_msg, addr)
-        except Exception:
-            pass
+        while True:
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                # Отключение WSAECONNRESET на Windows при недоставленном UDP пакете
+                if sys.platform == "win32":
+                    try:
+                        s.ioctl(socket.SIO_UDP_CONNRESET, False)
+                    except Exception:
+                        pass
+                s.bind(('', disc_port))
+                while True:
+                    try:
+                        data, addr = s.recvfrom(1024)
+                        text = data.decode('utf-8', errors='ignore').strip()
+                        if text.startswith(DISCOVERY_MAGIC_REQUEST):
+                            client_ip = addr[0]
+                            reply_ip = get_best_ip_for_peer(client_ip) or get_primary_lan_ip()
+                            # Собираем все активные физические IP сервера
+                            all_ips = [iface['ip'] for iface in get_local_interfaces() if not iface['is_virtual']]
+                            if reply_ip not in all_ips:
+                                all_ips.insert(0, reply_ip)
+                            ips_str = ",".join(all_ips)
+                            resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{reply_ip}:{port}:{ips_str}".encode('utf-8')
+                            s.sendto(resp_msg, addr)
+                    except Exception:
+                        time.sleep(0.05)
+            except Exception:
+                time.sleep(1.0)
 
     t1 = threading.Thread(target=listener, daemon=True)
     t1.start()
 
-    # 2. Периодический маяк (beacon) раз в 3 сек на всех физических адаптерах
+    # 2. Периодический маяк (beacon) раз в 2 сек на всех физических адаптерах
     def beacon():
         while True:
             try:
@@ -1487,7 +1502,9 @@ def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: in
                         continue
                     iface_ip = iface["ip"]
                     broadcast_addr = iface["broadcast"]
-                    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{iface_ip}:{port}".encode('utf-8')
+                    all_ips = [x['ip'] for x in ifaces if not x['is_virtual']]
+                    ips_str = ",".join(all_ips)
+                    resp_msg = f"{DISCOVERY_MAGIC_RESPONSE}:{iface_ip}:{port}:{ips_str}".encode('utf-8')
                     try:
                         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -1499,7 +1516,7 @@ def start_udp_broadcast_responder(port: int = DEFAULT_SERVER_PORT, disc_port: in
                         pass
             except Exception:
                 pass
-            time.sleep(3.0)
+            time.sleep(2.0)
 
     t2 = threading.Thread(target=beacon, daemon=True)
     t2.start()
