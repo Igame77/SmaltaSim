@@ -231,7 +231,25 @@ class StepTracker:
                     )
                 else:
                     # Все еще сбит на том же шаге
-                    if self.last_wrong_element == element_name and not self.is_last_action_revert:
+                    exp_act = self.examine_actions[self.current_step_idx]
+                    if exp_act.parent_element_name == element_name:
+                        # Курсант перемещает нужный орган, пытаясь вернуть его в правильное положение
+                        self.last_wrong_element = None
+                        self.is_last_action_revert = False
+                        return StepActionResult(
+                            is_valid_step=False,
+                            is_mistake=False,
+                            is_revert=False,
+                            is_restoration=False,
+                            broken_step_idx=lowest_broken,
+                            current_step_idx=self.current_step_idx,
+                            completed_steps=self.current_step_idx,
+                            max_reached_step_idx=self.max_reached_step_idx,
+                            total_steps=self.total_steps,
+                            progress_pct=self.current_step_idx / self.total_steps,
+                            message=f"Переключение органа '{element_name}' (положение {new_value}, для восстановления шага {lowest_broken + 1} требуется {exp_act.expected_value})"
+                        )
+                    elif self.last_wrong_element == element_name and not self.is_last_action_revert:
                         self.is_last_action_revert = True
                         self.last_wrong_element = None
                         return StepActionResult(
@@ -251,7 +269,6 @@ class StepTracker:
                         self.wrong_actions_count += 1
                         self.last_wrong_element = element_name
                         self.is_last_action_revert = False
-                        exp_act = self.examine_actions[self.current_step_idx]
                         return StepActionResult(
                             is_valid_step=False,
                             is_mistake=True,
@@ -306,27 +323,47 @@ class StepTracker:
         is_target_name = (expected_act.parent_element_name == element_name)
         is_target_val = (expected_act.expected_value is None or expected_act.expected_value == new_value)
 
-        if is_target_name and is_target_val:
-            self.current_step_idx += 1
-            self.max_reached_step_idx = max(self.max_reached_step_idx, self.current_step_idx)
-            self.last_wrong_element = None
-            self.is_last_action_revert = False
-            self.check_idle_advancement()
-            return StepActionResult(
-                is_valid_step=True,
-                is_mistake=False,
-                is_revert=False,
-                is_restoration=False,
-                broken_step_idx=None,
-                current_step_idx=self.current_step_idx,
-                completed_steps=self.current_step_idx,
-                max_reached_step_idx=self.max_reached_step_idx,
-                total_steps=self.total_steps,
-                progress_pct=self.current_step_idx / self.total_steps,
-                message=f"Выполнено действие (шаг {self.current_step_idx}/{self.total_steps}): '{element_name}'"
-            )
+        if is_target_name:
+            if is_target_val:
+                self.current_step_idx += 1
+                self.max_reached_step_idx = max(self.max_reached_step_idx, self.current_step_idx)
+                self.last_wrong_element = None
+                self.is_last_action_revert = False
+                self.check_idle_advancement()
+                return StepActionResult(
+                    is_valid_step=True,
+                    is_mistake=False,
+                    is_revert=False,
+                    is_restoration=False,
+                    broken_step_idx=None,
+                    current_step_idx=self.current_step_idx,
+                    completed_steps=self.current_step_idx,
+                    max_reached_step_idx=self.max_reached_step_idx,
+                    total_steps=self.total_steps,
+                    progress_pct=self.current_step_idx / self.total_steps,
+                    message=f"Выполнено действие (шаг {self.current_step_idx}/{self.total_steps}): '{element_name}'"
+                )
+            else:
+                # Курсант переключает требуемый орган управления (многопозиционный тумблер / переключатель),
+                # но еще не достиг целевого положения. Это не считается за ошибку, пока не будет попытки
+                # перейти к другому шагу.
+                self.last_wrong_element = None
+                self.is_last_action_revert = False
+                return StepActionResult(
+                    is_valid_step=False,
+                    is_mistake=False,
+                    is_revert=False,
+                    is_restoration=False,
+                    broken_step_idx=None,
+                    current_step_idx=self.current_step_idx,
+                    completed_steps=self.current_step_idx,
+                    max_reached_step_idx=self.max_reached_step_idx,
+                    total_steps=self.total_steps,
+                    progress_pct=self.current_step_idx / self.total_steps,
+                    message=f"Переключение органа '{element_name}' (положение {new_value}, требуется {expected_act.expected_value})"
+                )
 
-        # Не совпало с текущим требуемым шагом
+        # Не совпало с текущим требуемым органом (попытка перейти к другому шагу без выставления правильного положения)
         # Проверяем немедленный откат ошибочного действия
         if self.last_wrong_element == element_name and not self.is_last_action_revert:
             self.is_last_action_revert = True
@@ -361,7 +398,7 @@ class StepTracker:
             max_reached_step_idx=self.max_reached_step_idx,
             total_steps=self.total_steps,
             progress_pct=self.current_step_idx / self.total_steps,
-            message=f"ОШИБКА (шаг {self.current_step_idx + 1}/{self.total_steps}): нажато '{element_name}', требовалось '{expected_name}'"
+            message=f"ОШИБКА (шаг {self.current_step_idx + 1}/{self.total_steps}): нажато '{element_name}', орган '{expected_name}' не установлен в требуемое положение ({expected_act.expected_value})."
         )
 
     def get_score(self) -> dict:
@@ -370,8 +407,25 @@ class StepTracker:
         pct_ethalon = (completed / total) if total > 0 else 1.0
         pct_order = 1.0 if completed > 0 else 0.0
         wrong_cnt = self.wrong_actions_count
-        raw_score = pct_ethalon * 5.0 - wrong_cnt
-        score = max(1, min(5, int(round(raw_score))))
+
+        # Система оценок:
+        # - без ошибок (0) при 100% -> оценка 5
+        # - от 1 до 3 ошибок при 100% -> оценка 4
+        # - от 4 и более ошибок при 100% -> оценка 3
+        # - во всех остальных случаях (< 100% выполнения) -> оценка 2
+        # - единица исключена
+        is_100_pct = (completed >= total) and (total > 0)
+        if is_100_pct:
+            if wrong_cnt == 0:
+                score = 5
+            elif 1 <= wrong_cnt <= 3:
+                score = 4
+            else:
+                score = 3
+        else:
+            score = 2
+
+        raw_score = float(score)
         return {
             "score": score,
             "raw_score": raw_score,

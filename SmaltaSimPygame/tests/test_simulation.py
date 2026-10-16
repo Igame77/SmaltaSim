@@ -10,7 +10,7 @@ pygame.display.set_mode((1600, 870))
 from config import CANVAS_WIDTH, CANVAS_HEIGHT, Assets
 from devices.smalta import create_smalta_device, get_smalta_algorithms, SmaltaPage
 from devices.rls_onc import create_rls_device, get_rls_algorithms, RlsPage
-from core.algorithm_service import HistoryService, Action, ActionName, Algorithm
+from core.algorithm_service import HistoryService, Action, ActionName, Algorithm, StepTracker
 
 def test_assets_exist():
     assert Assets.BG_MAIN.exists(), "Missing BG_MAIN"
@@ -112,7 +112,7 @@ def test_history_scoring_math():
     assert res["score"] == 5
     assert res["wrong_actions"] == 0
 
-    # 2. Sequence with wrong clicks
+    # 2. Sequence with 2 wrong clicks (between 1 and 3 errors at 100% completion -> grade 4)
     history.reset()
     history.record_click("el_1")
     history.record_click("wrong_element")
@@ -120,11 +120,10 @@ def test_history_scoring_math():
     history.record_click("el_2")
     history.record_click("el_3")
     res = history.calculate_score(algo)
-    # 5 - 2 wrong = 3
-    assert res["score"] == 3
+    assert res["score"] == 4
     assert res["wrong_actions"] == 2
 
-    # 3. Sequence with immediate revert: wrong click followed immediately by returning it
+    # 3. Sequence with immediate revert: wrong click followed immediately by returning it (1 error -> grade 4)
     history.reset()
     history.record_click("el_1")
     history.record_click("wrong_element")
@@ -132,9 +131,29 @@ def test_history_scoring_math():
     history.record_click("el_2")
     history.record_click("el_3")
     res = history.calculate_score(algo)
-    # 5 - 1 wrong (revert deduplicated) = 4
     assert res["score"] == 4
     assert res["wrong_actions"] == 1
+
+    # 4. Sequence with 4 or more errors at 100% completion -> grade 3
+    history.reset()
+    history.record_click("el_1")
+    history.record_click("w1")
+    history.record_click("w2")
+    history.record_click("w3")
+    history.record_click("w4")
+    history.record_click("el_2")
+    history.record_click("el_3")
+    res = history.calculate_score(algo)
+    assert res["score"] == 3
+    assert res["wrong_actions"] == 4
+
+    # 5. Incomplete exam (< 100% completion, e.g. stopped early) -> grade 2 even with 0 errors
+    history.reset()
+    history.record_click("el_1")
+    res = history.calculate_score(algo)
+    assert res["score"] == 2
+    assert res["completed_steps"] == 1
+    assert res["total_steps"] == 3
 
 def test_training_mode_step_advancing():
     dev = create_smalta_device()
@@ -335,5 +354,58 @@ def test_multiple_broken_steps_sequential_restoration():
     # All earlier steps are now restored! Returns to step 5!
     assert tracker.current_step_idx == 5
     assert tracker.wrong_actions_count == 2
+
+
+def test_multiposition_element_intermediate_moves_not_mistakes():
+    algo = Algorithm("MultiPosTest", {}, {}, [
+        Action(ActionName.CLICK, "multi_switch", expected_value=2, use_in_examine_check=True),
+        Action(ActionName.CLICK, "next_tumbler", expected_value=1, use_in_examine_check=True),
+    ])
+    tracker = StepTracker(algo)
+
+    # 1. Moving multi_switch from 0 -> 1 (not expected 2 yet)
+    res1 = tracker.on_action(ActionName.CLICK, "multi_switch", 1)
+    assert res1.is_valid_step is False
+    assert res1.is_mistake is False
+    assert tracker.wrong_actions_count == 0
+    assert tracker.current_step_idx == 0
+
+    # 2. Moving multi_switch from 1 -> 0 (still on step 0, exploring/cycling)
+    res2 = tracker.on_action(ActionName.CLICK, "multi_switch", 0)
+    assert res2.is_valid_step is False
+    assert res2.is_mistake is False
+    assert tracker.wrong_actions_count == 0
+    assert tracker.current_step_idx == 0
+
+    # 3. Moving multi_switch to expected position 2 -> Step 0 completes!
+    res3 = tracker.on_action(ActionName.CLICK, "multi_switch", 2)
+    assert res3.is_valid_step is True
+    assert res3.is_mistake is False
+    assert tracker.wrong_actions_count == 0
+    assert tracker.current_step_idx == 1
+
+    # 4. Now on step 1 (requires next_tumbler=1).
+    # Interacting with next_tumbler with wrong position (0):
+    res4 = tracker.on_action(ActionName.CLICK, "next_tumbler", 0)
+    assert res4.is_valid_step is False
+    assert res4.is_mistake is False
+    assert tracker.wrong_actions_count == 0
+
+    # 5. Instead of putting next_tumbler to 1, student tries to click some other element:
+    res5 = tracker.on_action(ActionName.CLICK, "some_unrelated_element", 1)
+    # Moving to next step with wrong position -> Counts as a mistake!
+    assert res5.is_mistake is True
+    assert tracker.wrong_actions_count == 1
+    assert tracker.current_step_idx == 1
+
+    # 6. Put next_tumbler to 1 -> Completes step 1
+    res6 = tracker.on_action(ActionName.CLICK, "next_tumbler", 1)
+    assert res6.is_valid_step is True
+    assert res6.is_mistake is False
+    assert tracker.current_step_idx == 2
+    # Exam completed 100% with 1 mistake -> score 4!
+    score_res = tracker.get_score()
+    assert score_res["score"] == 4
+    assert score_res["wrong_actions"] == 1
 
 

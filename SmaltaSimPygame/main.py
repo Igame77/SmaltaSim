@@ -16,7 +16,7 @@ from core.algorithm_service import ActionName
 from devices.device_base import DeviceBase
 from devices.smalta import create_smalta_device, get_smalta_algorithms
 from devices.rls_onc import create_rls_device, get_rls_algorithms
-from ui.ui_widgets import UIButton, ModalDialog
+from ui.ui_widgets import UIButton, ModalDialog, MenuCardButton
 from ui.hint_renderer import HintRenderer
 from ui.student_auth_dialog import StudentAuthDialog, WaitingForTeacherDialog
 from network.student_client import StudentClient
@@ -48,9 +48,10 @@ class SimulatorApp:
 
         # Fonts - четкие детальные шрифты с поддержкой Segoe UI / Calibri
         font_families = ["segoeui", "calibri", "arial"]
-        self.title_font = pygame.font.SysFont(font_families, 36, bold=True)
-        self.subtitle_font = pygame.font.SysFont(font_families, 18)
-        self.nav_font = pygame.font.SysFont(font_families, 14, bold=True)
+        self.title_font = pygame.font.SysFont(font_families, 34, bold=True)
+        self.subtitle_font = pygame.font.SysFont(font_families, 18, bold=True)
+        self.header_desc_font = pygame.font.SysFont(font_families, 13)
+        self.nav_font = pygame.font.SysFont(font_families, 15, bold=True)
         self.badge_font = pygame.font.SysFont(font_families, 13, bold=True)
         self.header_font = pygame.font.SysFont(font_families, 14, bold=True)
 
@@ -113,43 +114,45 @@ class SimulatorApp:
         self.btn_fullscreen.text = "В окно" if self.is_fullscreen else "На весь экран"
 
     def _build_main_menu_buttons(self):
-        btn_w, btn_h = 250, 54
-        start_x = 100
-        start_y = 280
-        gap = 20
+        header_w = 1000
+        header_x = (SCREEN_WIDTH - header_w) // 2
+        btn_w, btn_h = 470, 78
+        btn_x = header_x
+        btn_y = 230
+        gap = 18
 
         self.menu_buttons = [
-            UIButton(
-                pygame.Rect(start_x, start_y, btn_w, btn_h),
-                "Обучение",
+            MenuCardButton(
+                pygame.Rect(btn_x, btn_y, btn_w, btn_h),
+                title="ОБУЧЕНИЕ",
+                subtitle="Пошаговый тренажер с подсказками по органам управления",
                 callback=lambda: self._open_device_selection(ApplicationMode.TRAINING),
-                font_size=18,
-                bg_color=(35, 110, 160),
-                border_radius=6
+                accent_color=(14, 165, 233),
+                border_radius=8
             ),
-            UIButton(
-                pygame.Rect(start_x, start_y + (btn_h + gap), btn_w, btn_h),
-                "Экзамен",
+            MenuCardButton(
+                pygame.Rect(btn_x, btn_y + (btn_h + gap), btn_w, btn_h),
+                title="ЭКЗАМЕН",
+                subtitle="Сдача практического норматива и сетевой аудит",
                 callback=self._open_exam_auth_dialog,
-                font_size=18,
-                bg_color=(170, 95, 30),
-                border_radius=6
+                accent_color=(245, 158, 11),
+                border_radius=8
             ),
-            UIButton(
-                pygame.Rect(start_x, start_y + 2 * (btn_h + gap), btn_w, btn_h),
-                "Информация",
+            MenuCardButton(
+                pygame.Rect(btn_x, btn_y + 2 * (btn_h + gap), btn_w, btn_h),
+                title="ИНФОРМАЦИЯ",
+                subtitle="Методическое описание станций и регламентов работы",
                 callback=self._show_info_dialog,
-                font_size=18,
-                bg_color=(50, 65, 80),
-                border_radius=6
+                accent_color=(99, 102, 241),
+                border_radius=8
             ),
-            UIButton(
-                pygame.Rect(start_x, start_y + 3 * (btn_h + gap), btn_w, btn_h),
-                "Выход",
+            MenuCardButton(
+                pygame.Rect(btn_x, btn_y + 3 * (btn_h + gap), btn_w, btn_h),
+                title="ВЫХОД",
+                subtitle="Завершение работы программы",
                 callback=self.quit,
-                font_size=18,
-                bg_color=(120, 45, 45),
-                border_radius=6
+                accent_color=(239, 68, 68),
+                border_radius=8
             )
         ]
 
@@ -491,7 +494,6 @@ class SimulatorApp:
             4: "ХОРОШО (4)",
             3: "УДОВЛЕТВОРИТЕЛЬНО (3)",
             2: "НЕУДОВЛЕТВОРИТЕЛЬНО (2)",
-            1: "НЕУДОВЛЕТВОРИТЕЛЬНО (1)",
         }
         title = f"Результат: {grade_names.get(score, str(score))}"
 
@@ -602,7 +604,6 @@ class SimulatorApp:
             4: "ХОРОШО (4)",
             3: "УДОВЛЕТВОРИТЕЛЬНО (3)",
             2: "НЕУДОВЛЕТВОРИТЕЛЬНО (2)",
-            1: "НЕУДОВЛЕТВОРИТЕЛЬНО (1)",
         }
         title = f"Экзамен остановлен преподавателем: {grade_names.get(score, str(score))}"
         msg = "Экзамен был принудительно завершен преподавателем.\nТекущий прогресс и оценка сохранены в ведомость.\n\n" + details_str
@@ -771,24 +772,78 @@ class SimulatorApp:
     def draw_main_menu(self):
         self.screen.blit(self.menu_bg, (0, 0))
 
-        # Title Card with dark translucent plate
-        card = pygame.Surface((700, 150), pygame.SRCALPHA)
-        card.fill((15, 20, 25, 210))
-        pygame.draw.rect(card, (0, 180, 220), (0, 0, 700, 150), width=2, border_radius=8)
+        header_w, header_h = 1000, 140
+        header_x = (SCREEN_WIDTH - header_w) // 2
+        header_y = 60
 
-        t1 = self.title_font.render("Vkm.ComplexSim", True, (255, 255, 255))
-        t2 = self.subtitle_font.render("Комплексный симулятор устройств РЭБ и радиолокации", True, (0, 210, 255))
-        t3 = self.subtitle_font.render("Учебный тренажер по изделиям ЛО01 'Смальта' и РЛС ОНЦ", True, COLOR_TEXT_DIM)
+        # Header Card (Top Center)
+        header_surf = pygame.Surface((header_w, header_h), pygame.SRCALPHA)
+        header_surf.fill((15, 23, 42, 220))
+        pygame.draw.rect(header_surf, (30, 41, 59), (0, 0, header_w, header_h), width=1, border_radius=12)
+        pygame.draw.line(header_surf, (14, 165, 233), (20, 0), (header_w - 20, 0), 2)
 
-        card.blit(t1, (25, 20))
-        card.blit(t2, (25, 68))
-        card.blit(t3, (25, 100))
+        t_main = self.title_font.render("VKM.COMPLEXSIM", True, (248, 250, 252))
+        t_sub = self.subtitle_font.render("Комплексный учебно-тренировочный симулятор устройств РЭБ и радиолокации", True, (56, 189, 248))
+        t_desc = self.header_desc_font.render("Отработка практических регламентов по станциям ЛО01 «Смальта» и РЛС ОНЦ", True, (148, 163, 184))
 
-        self.screen.blit(card, (100, 80))
+        header_surf.blit(t_main, (35, 20))
+        header_surf.blit(t_sub, (35, 66))
+        header_surf.blit(t_desc, (35, 96))
 
-        # Buttons
+        # Badges on right side of header
+        badges = [("[ v2.2.0 ]", (148, 163, 184)), ("[ СЕТЕВОЙ МОНИТОРИНГ ]", (148, 163, 184)), ("[ ГОТОВ ]", (52, 211, 153))]
+        bx = header_w - 35
+        for badge_text, badge_col in badges:
+            b_surf = self.badge_font.render(badge_text, True, badge_col)
+            bx -= (b_surf.get_width() + 12)
+            header_surf.blit(b_surf, (bx, 28))
+
+        self.screen.blit(header_surf, (header_x, header_y))
+
+        # Buttons (Left Column)
         for b in self.menu_buttons:
             b.draw(self.screen)
+
+        # Right Column: Overview Panel
+        btn_w, btn_h = 470, 78
+        gap = 18
+        panel_x = header_x + btn_w + 30
+        panel_y = 230
+        panel_w = header_w - btn_w - 30
+        panel_h = (btn_h + gap) * 4 - gap
+
+        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel_surf.fill((15, 23, 42, 220))
+        pygame.draw.rect(panel_surf, (30, 41, 59), (0, 0, panel_w, panel_h), width=1, border_radius=10)
+
+        p_title = self.subtitle_font.render("Доступные изделия тренажера", True, (241, 245, 249))
+        panel_surf.blit(p_title, (25, 20))
+
+        devs = [
+            ("Станция помех ЛО01 «Смальта»",
+             "Вертолетная станция активных помех РЭБ.\nПульты ЛО01-П, передатчик ЛО01-Р, блок ЛО01-И/К.",
+             (14, 165, 233)),
+            ("РЛС ОНЦ",
+             "Радиолокационная станция обнаружения надводных целей.\nГенератор Г5-15, осциллограф С1-65, радарный экран.",
+             (56, 189, 248)),
+        ]
+
+        for didx, (dname, ddesc, dcol) in enumerate(devs):
+            dy = 65 + didx * 140
+            dcard = pygame.Surface((panel_w - 50, 120), pygame.SRCALPHA)
+            dcard.fill((10, 15, 28, 180))
+            pygame.draw.rect(dcard, (30, 41, 59), (0, 0, panel_w - 50, 120), width=1, border_radius=6)
+            pygame.draw.rect(dcard, dcol, (0, 0, 4, 120), border_top_left_radius=6, border_bottom_left_radius=6)
+
+            dt = self.nav_font.render(dname, True, (241, 245, 249))
+            dcard.blit(dt, (18, 12))
+
+            for l_idx, line in enumerate(ddesc.split("\n")):
+                dcard.blit(self.header_desc_font.render(line, True, (148, 163, 184)), (18, 42 + l_idx * 22))
+
+            panel_surf.blit(dcard, (25, dy))
+
+        self.screen.blit(panel_surf, (panel_x, panel_y))
 
         # Fullscreen button in menu
         self.btn_fullscreen.draw(self.screen)

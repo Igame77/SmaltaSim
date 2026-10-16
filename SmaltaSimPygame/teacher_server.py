@@ -434,7 +434,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
     def _serve_csv_export(self):
         output = io.StringIO()
         output.write("\ufeff") # UTF-8 BOM для корректного открытия в Excel
-        output.write("ФИО;Группа;Рабочее место;Устройство;Задание;Статус;Оценка;Ошибок;Время (сек);Отвлечений;Секунд вне симулятора\n")
+        output.write("ФИО;Группа;Рабочее место;Устройство;Задание;Статус;Оценка;Ошибок;Время (сек)\n")
 
         with server_state.lock:
             for st in server_state.students.values():
@@ -442,7 +442,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
                 output.write(
                     f"{st.full_name};{st.group};{st.pc_name};{st.device_name};"
                     f"{st.algorithm_name};{st.status};{score_str};{st.mistakes_count};"
-                    f"{int(st.elapsed_sec)};{st.focus_lost_count};{int(st.total_focus_lost_sec)}\n"
+                    f"{int(st.elapsed_sec)}\n"
                 )
 
         csv_bytes = output.getvalue().encode('utf-8')

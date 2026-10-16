@@ -91,6 +91,69 @@ class UIButton:
         surface.blit(text_surf, (tx, ty))
 
 
+class MenuCardButton:
+    def __init__(
+        self,
+        rect: pygame.Rect,
+        title: str,
+        subtitle: str,
+        callback: Optional[Callable[[], None]] = None,
+        accent_color: Tuple[int, int, int] = (14, 165, 233),
+        border_radius: int = 8
+    ):
+        self.rect = rect
+        self.title = title
+        self.subtitle = subtitle
+        self.callback = callback
+        self.accent_color = accent_color
+        self.border_radius = border_radius
+        self.is_hovered = False
+        self.is_pressed = False
+        self.font_title = get_ui_font(20, bold=True)
+        self.font_sub = get_ui_font(13)
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if event.type == pygame.MOUSEMOTION:
+            self.is_hovered = self.rect.collidepoint(event.pos)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                self.is_pressed = True
+                return True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            if self.is_pressed:
+                self.is_pressed = False
+                if self.rect.collidepoint(event.pos) and self.callback:
+                    self.callback()
+                return True
+        return False
+
+    def draw(self, surface: pygame.Surface):
+        card_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+        if self.is_pressed:
+            bg_col = (25, 36, 56, 240)
+            border_col = self.accent_color
+        elif self.is_hovered:
+            bg_col = (22, 32, 50, 235)
+            border_col = self.accent_color
+        else:
+            bg_col = (15, 23, 42, 215)
+            border_col = (30, 41, 59)
+
+        card_surf.fill(bg_col)
+        pygame.draw.rect(card_surf, border_col, (0, 0, self.rect.width, self.rect.height), width=1, border_radius=self.border_radius)
+        # Left accent stripe
+        stripe_w = 6 if self.is_hovered else 4
+        pygame.draw.rect(card_surf, self.accent_color, (0, 0, stripe_w, self.rect.height), border_top_left_radius=self.border_radius, border_bottom_left_radius=self.border_radius)
+
+        t_title = self.font_title.render(self.title, True, (255, 255, 255) if self.is_hovered else (241, 245, 249))
+        t_sub = self.font_sub.render(self.subtitle, True, (203, 213, 225) if self.is_hovered else (148, 163, 184))
+
+        card_surf.blit(t_title, (24, 14))
+        card_surf.blit(t_sub, (24, 44))
+
+        surface.blit(card_surf, (self.rect.x, self.rect.y))
+
+
 class ModalDialog:
     def __init__(
         self,
