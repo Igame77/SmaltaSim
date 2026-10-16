@@ -247,7 +247,7 @@ class SimulatorApp:
         )
 
     def _prepare_examine_session(self, device: DeviceBase, algo):
-        total_steps = len([a for a in algo.actions if a.use_in_examine_check])
+        total_steps = len([a for a in algo.actions if a.use_in_examine_check and a.name != ActionName.INFO])
         logged_in = self.student_client.login_sync(
             full_name=self.student_data.get("full_name", "Курсант"),
             group=self.student_data.get("group", "401"),
@@ -296,108 +296,67 @@ class SimulatorApp:
         if self.mode != ApplicationMode.EXAMINE or not self.active_device or not self.active_device.current_algorithm:
             return
 
-        res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
-        wrong_count = res.get("wrong_actions", 0)
-
-        hs = self.active_device.hint_service
-        expected_action = hs.get_current_action()
-        cur_step_idx = hs.current_action_index
-        total_steps = len([a for a in self.active_device.current_algorithm.actions if a.use_in_examine_check])
-
-        el = self.active_device.get_element_by_name(element_name)
-        val = el.value if el else 0
-
-        # Если курсант нажал не на тот элемент, но сразу вернул его в исходное положение (повторное нажатие),
-        # то ошибка засчитывается только одна, а возврат регистрируется как нейтральное действие
-        is_revert = False
-        if getattr(self, '_last_wrong_element', None) == element_name and wrong_count == self._prev_wrong_actions:
-            is_revert = True
-            self._last_wrong_element = None
-
-        if is_revert:
-            if self.is_network_exam:
-                msg = f"Возврат органа управления '{element_name}' в исходное положение (ошибка не дублируется)"
-                self.student_client.send_event(
-                    EventType.ACTION,
-                    msg,
-                    details={
-                        "step": cur_step_idx + 1,
-                        "total_steps": total_steps,
-                        "clicked_element": element_name,
-                        "is_mistake": False,
-                        "is_revert": True
-                    },
-                    is_mistake=False
-                )
+        tracker = getattr(self.active_device, 'step_tracker', None)
+        if not tracker:
             return
 
-        is_mistake = (wrong_count > self._prev_wrong_actions)
+        res = getattr(self.active_device.history_service, 'last_action_result', None)
+        if not res:
+            el = self.active_device.get_element_by_name(element_name)
+            val = el.value if el else 0
+            res = tracker.on_action(action_name, element_name, val)
 
-        if is_mistake:
-            self._prev_wrong_actions = wrong_count
-            self._last_wrong_element = element_name
-        else:
-            self._last_wrong_element = None
-
-        # Обновляем прогресс hint_service только для обычных действий и новых ошибок
-        hs.on_element_interacted(element_name, val)
+        # Синхронизируем индекс с hint_service для корректности HUD
+        hs = self.active_device.hint_service
+        hs.current_action_index = tracker.current_step_idx
 
         if not self.is_network_exam:
             return
 
-        # 1. Аннотированный снимок экрана с BBox ошибочного (красный) и нужного (зеленый) органа
-        try:
-            jpeg = self.action_annotator.capture_action_snapshot(
-                screen_surface=self.screen,
-                is_mistake=is_mistake,
-                clicked_element_name=element_name,
-                device=self.active_device,
-                current_step_idx=cur_step_idx,
-                total_steps=total_steps,
-                expected_action=expected_action
-            )
-            if jpeg:
-                self.student_client.send_screenshot(jpeg)
-        except Exception:
-            pass
+        expected_action = tracker.get_current_expected_action()
+        cur_step_idx = tracker.current_step_idx
+        total_steps = tracker.total_steps
 
-        # 2. Формируем подробную запись в журнал с контекстом из обучения
+        # 1. Аннотированный снимок экрана с BBox ошибочного (красный) и нужного (зеленый) органа
+        if res.is_mistake:
+            try:
+                jpeg = self.action_annotator.capture_action_snapshot(
+                    screen_surface=self.screen,
+                    is_mistake=True,
+                    clicked_element_name=element_name,
+                    device=self.active_device,
+                    current_step_idx=cur_step_idx,
+                    total_steps=total_steps,
+                    expected_action=expected_action
+                )
+                if jpeg:
+                    self.student_client.send_screenshot(jpeg)
+            except Exception:
+                pass
+
+        # 2. Формируем подробную запись в журнал преподавателя
         hint_txt = expected_action.hint_text if expected_action else ""
         expected_name = expected_action.parent_element_name if expected_action else "—"
 
-        if is_mistake:
-            msg = f"ОШИБКА (шаг {cur_step_idx + 1}/{total_steps}): нажато '{element_name}', требовалось '{expected_name}'"
-            if hint_txt:
-                msg += f" • [Контекст задачи: {hint_txt}]"
-            self.student_client.send_event(
-                EventType.MISTAKE,
-                msg,
-                details={
-                    "step": cur_step_idx + 1,
-                    "total_steps": total_steps,
-                    "clicked_element": element_name,
-                    "expected_element": expected_name,
-                    "hint_context": hint_txt,
-                    "is_mistake": True
-                },
-                is_mistake=True
-            )
-        else:
-            msg = f"Выполнено действие (шаг {cur_step_idx + 1}/{total_steps}): '{element_name}'"
-            if hint_txt:
-                msg += f" • [Задача: {hint_txt}]"
-            self.student_client.send_event(
-                EventType.ACTION,
-                msg,
-                details={
-                    "step": cur_step_idx + 1,
-                    "total_steps": total_steps,
-                    "clicked_element": element_name,
-                    "hint_context": hint_txt,
-                    "is_mistake": False
-                },
-                is_mistake=False
-            )
+        event_type = EventType.MISTAKE if res.is_mistake else EventType.ACTION
+        self.student_client.send_event(
+            event_type,
+            res.message,
+            details={
+                "step": cur_step_idx + 1 if cur_step_idx < total_steps else total_steps,
+                "total_steps": total_steps,
+                "completed_steps": res.completed_steps,
+                "max_reached_step": res.max_reached_step_idx,
+                "clicked_element": element_name,
+                "expected_element": expected_name,
+                "hint_context": hint_txt,
+                "is_mistake": res.is_mistake,
+                "is_revert": res.is_revert,
+                "is_restoration": res.is_restoration,
+                "broken_step_idx": res.broken_step_idx
+            },
+            is_mistake=res.is_mistake
+        )
 
     def start_simulation(self, device: DeviceBase, algorithm):
         self.active_device = device
@@ -745,6 +704,9 @@ class SimulatorApp:
             # Update
             if self.state == AppState.SIMULATION and self.active_device:
                 self.active_device.update(dt_ms)
+                tracker = getattr(self.active_device, 'step_tracker', None)
+                if tracker:
+                    tracker.check_idle_advancement()
                 self._update_navbar_buttons_state()
 
                 # Telemetry Update
@@ -753,18 +715,18 @@ class SimulatorApp:
                     # Heartbeat every 1.5s
                     if now - self.last_heartbeat_time >= 1.5 and self.active_device.current_algorithm:
                         self.last_heartbeat_time = now
-                        res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
-                        total_steps = len([a for a in self.active_device.current_algorithm.actions if a.use_in_examine_check])
-                        pct = res.get("pct_ethalon", 0.0)
-                        completed = int(pct * total_steps)
-                        mistakes = res.get("wrong_actions", 0)
+                        score_data = tracker.get_score() if tracker else self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
+                        total_steps = score_data.get("total_steps", 0)
+                        pct = score_data.get("pct_ethalon", 0.0)
+                        completed = score_data.get("completed_steps", int(pct * total_steps))
+                        mistakes = score_data.get("wrong_actions", 0)
                         elapsed = now - self.exam_start_time
                         self.student_client.queue_heartbeat(
                             progress_pct=pct,
                             completed_steps=completed,
                             mistakes_count=mistakes,
                             elapsed_sec=elapsed,
-                            score=res.get("score")
+                            score=score_data.get("score")
                         )
 
                 # Training complete check

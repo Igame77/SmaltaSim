@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from typing import List, Dict, Optional, Callable, Any
+from dataclasses import dataclass
 
 class ActionName(Enum):
     CLICK = auto()
@@ -21,7 +22,10 @@ class Action:
         self.parent_element_name = parent_element_name
         self.hint_text = hint_text  # Level 3: direct hint (старая прямая подсказка)
         self.expected_value = expected_value
-        self.use_in_examine_check = use_in_examine_check
+        if name == ActionName.INFO:
+            self.use_in_examine_check = False
+        else:
+            self.use_in_examine_check = use_in_examine_check
         self.is_completed = False
         self.hint_indirect = hint_indirect or hint_text  # Level 1: "запустите систему..."
         self.hint_clarify = hint_clarify or hint_text    # Level 2: уточняющая подсказка
@@ -39,13 +43,361 @@ class Algorithm:
         self.end_state_of_elements = end_state_of_elements or {}
         self.actions = actions or []
 
+@dataclass
+class StepActionResult:
+    is_valid_step: bool
+    is_mistake: bool
+    is_revert: bool
+    is_restoration: bool
+    broken_step_idx: Optional[int]
+    current_step_idx: int
+    completed_steps: int
+    max_reached_step_idx: int
+    total_steps: int
+    progress_pct: float
+    message: str
+
+
+class StepTracker:
+    def __init__(self, algorithm: Algorithm, device: Optional[Any] = None):
+        self.algorithm = algorithm
+        self.device = device
+
+        self.examine_actions: List[Action] = [
+            a for a in algorithm.actions
+            if a.use_in_examine_check and a.name != ActionName.INFO
+        ]
+        self.total_steps: int = len(self.examine_actions)
+
+        self.current_step_idx: int = 0
+        self.max_reached_step_idx: int = 0
+        self.wrong_actions_count: int = 0
+
+        self.last_wrong_element: Optional[str] = None
+        self.is_last_action_revert: bool = False
+
+        self._simulated_values: Dict[str, int] = dict(algorithm.start_state_of_elements)
+
+    def reset(self):
+        self.current_step_idx = 0
+        self.max_reached_step_idx = 0
+        self.wrong_actions_count = 0
+        self.last_wrong_element = None
+        self.is_last_action_revert = False
+        self._simulated_values = dict(self.algorithm.start_state_of_elements)
+
+    def get_element_value(self, element_name: str) -> int:
+        if self.device:
+            el = self.device.get_element_by_name(element_name)
+            if el is not None:
+                return el.value
+        return self._simulated_values.get(element_name, 0)
+
+    def get_current_expected_action(self) -> Optional[Action]:
+        if 0 <= self.current_step_idx < self.total_steps:
+            return self.examine_actions[self.current_step_idx]
+        return None
+
+    def get_required_states_up_to(self, step_count: int) -> Dict[str, int]:
+        required = {}
+        limit = min(step_count, self.total_steps)
+        for i in range(limit):
+            act = self.examine_actions[i]
+            if act.expected_value is not None:
+                required[act.parent_element_name] = act.expected_value
+        return required
+
+    def find_lowest_broken_step(self) -> Optional[int]:
+        if self.max_reached_step_idx <= 0:
+            return None
+
+        required_states = self.get_required_states_up_to(self.max_reached_step_idx)
+        for i in range(self.max_reached_step_idx):
+            act = self.examine_actions[i]
+            if act.expected_value is not None:
+                req_val = required_states.get(act.parent_element_name)
+                curr_val = self.get_element_value(act.parent_element_name)
+                if req_val is not None and curr_val != req_val:
+                    return i
+        return None
+
+    def check_idle_advancement(self) -> List[Action]:
+        advanced = []
+        while self.current_step_idx < self.total_steps:
+            act = self.examine_actions[self.current_step_idx]
+            if act.name == ActionName.IDLE:
+                curr_val = self.get_element_value(act.parent_element_name)
+                if act.expected_value is None or curr_val == act.expected_value:
+                    self.current_step_idx += 1
+                    self.max_reached_step_idx = max(self.max_reached_step_idx, self.current_step_idx)
+                    advanced.append(act)
+                    continue
+            break
+        return advanced
+
+    def on_action(
+        self,
+        action_name: ActionName,
+        element_name: str,
+        new_value: Optional[int] = None
+    ) -> StepActionResult:
+        if new_value is not None:
+            self._simulated_values[element_name] = new_value
+        elif self.device:
+            new_value = self.get_element_value(element_name)
+        else:
+            prev_val = self._simulated_values.get(element_name, 0)
+            new_val = 1 if prev_val == 0 else 0
+            self._simulated_values[element_name] = new_val
+            new_value = new_val
+
+        if self.total_steps == 0:
+            return StepActionResult(
+                is_valid_step=True,
+                is_mistake=False,
+                is_revert=False,
+                is_restoration=False,
+                broken_step_idx=None,
+                current_step_idx=0,
+                completed_steps=0,
+                max_reached_step_idx=0,
+                total_steps=0,
+                progress_pct=1.0,
+                message="Нет эталонных шагов для проверки"
+            )
+
+        was_broken_before = (self.current_step_idx < self.max_reached_step_idx)
+        lowest_broken = self.find_lowest_broken_step()
+
+        # 1. Если нарушен один из ранее завершенных этапов
+        if lowest_broken is not None:
+            if not was_broken_before:
+                # Курсант сбил положение тумблера с ранее пройденного этапа
+                self.wrong_actions_count += 1
+                self.current_step_idx = lowest_broken
+                self.last_wrong_element = element_name
+                self.is_last_action_revert = False
+                broken_step_num = lowest_broken + 1
+                return StepActionResult(
+                    is_valid_step=False,
+                    is_mistake=True,
+                    is_revert=False,
+                    is_restoration=False,
+                    broken_step_idx=lowest_broken,
+                    current_step_idx=self.current_step_idx,
+                    completed_steps=self.current_step_idx,
+                    max_reached_step_idx=self.max_reached_step_idx,
+                    total_steps=self.total_steps,
+                    progress_pct=self.current_step_idx / self.total_steps,
+                    message=f"ОШИБКА: нарушено методическое положение органа '{element_name}' с этапа {broken_step_num}. Прогресс сброшен до шага {broken_step_num}."
+                )
+            else:
+                if lowest_broken > self.current_step_idx:
+                    # Курсант восстановил текущий нарушенный орган, но остался еще один сбитый выше
+                    self.current_step_idx = lowest_broken
+                    self.last_wrong_element = None
+                    self.is_last_action_revert = False
+                    return StepActionResult(
+                        is_valid_step=True,
+                        is_mistake=False,
+                        is_revert=False,
+                        is_restoration=True,
+                        broken_step_idx=lowest_broken,
+                        current_step_idx=self.current_step_idx,
+                        completed_steps=self.current_step_idx,
+                        max_reached_step_idx=self.max_reached_step_idx,
+                        total_steps=self.total_steps,
+                        progress_pct=self.current_step_idx / self.total_steps,
+                        message=f"Орган '{element_name}' возвращен в норму. Требуется восстановить шаг {lowest_broken + 1}."
+                    )
+                elif lowest_broken < self.current_step_idx:
+                    # Курсант сбил еще более ранний орган управления
+                    self.wrong_actions_count += 1
+                    self.current_step_idx = lowest_broken
+                    self.last_wrong_element = element_name
+                    self.is_last_action_revert = False
+                    return StepActionResult(
+                        is_valid_step=False,
+                        is_mistake=True,
+                        is_revert=False,
+                        is_restoration=False,
+                        broken_step_idx=lowest_broken,
+                        current_step_idx=self.current_step_idx,
+                        completed_steps=self.current_step_idx,
+                        max_reached_step_idx=self.max_reached_step_idx,
+                        total_steps=self.total_steps,
+                        progress_pct=self.current_step_idx / self.total_steps,
+                        message=f"ОШИБКА: дополнительно нарушен шаг {lowest_broken + 1} ('{element_name}')."
+                    )
+                else:
+                    # Все еще сбит на том же шаге
+                    if self.last_wrong_element == element_name and not self.is_last_action_revert:
+                        self.is_last_action_revert = True
+                        self.last_wrong_element = None
+                        return StepActionResult(
+                            is_valid_step=False,
+                            is_mistake=False,
+                            is_revert=True,
+                            is_restoration=False,
+                            broken_step_idx=lowest_broken,
+                            current_step_idx=self.current_step_idx,
+                            completed_steps=self.current_step_idx,
+                            max_reached_step_idx=self.max_reached_step_idx,
+                            total_steps=self.total_steps,
+                            progress_pct=self.current_step_idx / self.total_steps,
+                            message=f"Возврат органа управления '{element_name}' в исходное положение (ошибка не дублируется)"
+                        )
+                    else:
+                        self.wrong_actions_count += 1
+                        self.last_wrong_element = element_name
+                        self.is_last_action_revert = False
+                        exp_act = self.examine_actions[self.current_step_idx]
+                        return StepActionResult(
+                            is_valid_step=False,
+                            is_mistake=True,
+                            is_revert=False,
+                            is_restoration=False,
+                            broken_step_idx=lowest_broken,
+                            current_step_idx=self.current_step_idx,
+                            completed_steps=self.current_step_idx,
+                            max_reached_step_idx=self.max_reached_step_idx,
+                            total_steps=self.total_steps,
+                            progress_pct=self.current_step_idx / self.total_steps,
+                            message=f"ОШИБКА: нажато '{element_name}', требуется вернуть в правильное положение '{exp_act.parent_element_name}'."
+                        )
+
+        # 2. Если все ранее пройденные шаги восстановлены
+        if was_broken_before:
+            self.current_step_idx = self.max_reached_step_idx
+            self.last_wrong_element = None
+            self.is_last_action_revert = False
+            self.check_idle_advancement()
+            return StepActionResult(
+                is_valid_step=True,
+                is_mistake=False,
+                is_revert=False,
+                is_restoration=True,
+                broken_step_idx=None,
+                current_step_idx=self.current_step_idx,
+                completed_steps=self.current_step_idx,
+                max_reached_step_idx=self.max_reached_step_idx,
+                total_steps=self.total_steps,
+                progress_pct=self.current_step_idx / self.total_steps,
+                message=f"Орган '{element_name}' возвращен в правильное положение. Прогресс восстановлен до шага {self.current_step_idx + 1}."
+            )
+
+        # 3. Штатный режим (current_step_idx == max_reached_step_idx)
+        if self.current_step_idx >= self.total_steps:
+            return StepActionResult(
+                is_valid_step=False,
+                is_mistake=False,
+                is_revert=False,
+                is_restoration=False,
+                broken_step_idx=None,
+                current_step_idx=self.total_steps,
+                completed_steps=self.total_steps,
+                max_reached_step_idx=self.total_steps,
+                total_steps=self.total_steps,
+                progress_pct=1.0,
+                message=f"Действие '{element_name}' (все шаги задания уже выполнены)."
+            )
+
+        expected_act = self.examine_actions[self.current_step_idx]
+        is_target_name = (expected_act.parent_element_name == element_name)
+        is_target_val = (expected_act.expected_value is None or expected_act.expected_value == new_value)
+
+        if is_target_name and is_target_val:
+            self.current_step_idx += 1
+            self.max_reached_step_idx = max(self.max_reached_step_idx, self.current_step_idx)
+            self.last_wrong_element = None
+            self.is_last_action_revert = False
+            self.check_idle_advancement()
+            return StepActionResult(
+                is_valid_step=True,
+                is_mistake=False,
+                is_revert=False,
+                is_restoration=False,
+                broken_step_idx=None,
+                current_step_idx=self.current_step_idx,
+                completed_steps=self.current_step_idx,
+                max_reached_step_idx=self.max_reached_step_idx,
+                total_steps=self.total_steps,
+                progress_pct=self.current_step_idx / self.total_steps,
+                message=f"Выполнено действие (шаг {self.current_step_idx}/{self.total_steps}): '{element_name}'"
+            )
+
+        # Не совпало с текущим требуемым шагом
+        # Проверяем немедленный откат ошибочного действия
+        if self.last_wrong_element == element_name and not self.is_last_action_revert:
+            self.is_last_action_revert = True
+            self.last_wrong_element = None
+            return StepActionResult(
+                is_valid_step=False,
+                is_mistake=False,
+                is_revert=True,
+                is_restoration=False,
+                broken_step_idx=None,
+                current_step_idx=self.current_step_idx,
+                completed_steps=self.current_step_idx,
+                max_reached_step_idx=self.max_reached_step_idx,
+                total_steps=self.total_steps,
+                progress_pct=self.current_step_idx / self.total_steps,
+                message=f"Возврат органа управления '{element_name}' в исходное положение (ошибка не дублируется)"
+            )
+
+        # Ошибочное или внеочередное действие («в разнобой»)
+        self.wrong_actions_count += 1
+        self.last_wrong_element = element_name
+        self.is_last_action_revert = False
+        expected_name = expected_act.parent_element_name
+        return StepActionResult(
+            is_valid_step=False,
+            is_mistake=True,
+            is_revert=False,
+            is_restoration=False,
+            broken_step_idx=None,
+            current_step_idx=self.current_step_idx,
+            completed_steps=self.current_step_idx,
+            max_reached_step_idx=self.max_reached_step_idx,
+            total_steps=self.total_steps,
+            progress_pct=self.current_step_idx / self.total_steps,
+            message=f"ОШИБКА (шаг {self.current_step_idx + 1}/{self.total_steps}): нажато '{element_name}', требовалось '{expected_name}'"
+        )
+
+    def get_score(self) -> dict:
+        completed = self.current_step_idx
+        total = self.total_steps
+        pct_ethalon = (completed / total) if total > 0 else 1.0
+        pct_order = 1.0 if completed > 0 else 0.0
+        wrong_cnt = self.wrong_actions_count
+        raw_score = pct_ethalon * 5.0 - wrong_cnt
+        score = max(1, min(5, int(round(raw_score))))
+        return {
+            "score": score,
+            "raw_score": raw_score,
+            "pct_ethalon": pct_ethalon,
+            "pct_order": pct_order,
+            "wrong_actions": wrong_cnt,
+            "completed_steps": completed,
+            "total_steps": total,
+            "current_step_idx": self.current_step_idx,
+            "max_reached_step_idx": self.max_reached_step_idx,
+            "total_user_actions": self.wrong_actions_count + completed,
+            "ethalon_count": total,
+        }
+
+
 class HistoryService:
     def __init__(self):
         self.actions: List[tuple[ActionName, str]] = []
         self.on_action_callback: Optional[Callable[[ActionName, str], None]] = None
+        self.step_tracker: Optional[StepTracker] = None
+        self.last_action_result: Optional[StepActionResult] = None
 
     def record_click(self, element_name: str):
         self.actions.append((ActionName.CLICK, element_name))
+        if self.step_tracker:
+            self.last_action_result = self.step_tracker.on_action(ActionName.CLICK, element_name)
         if self.on_action_callback:
             try:
                 self.on_action_callback(ActionName.CLICK, element_name)
@@ -54,6 +406,8 @@ class HistoryService:
 
     def record_idle(self, element_name: str):
         self.actions.append((ActionName.IDLE, element_name))
+        if self.step_tracker:
+            self.last_action_result = self.step_tracker.on_action(ActionName.IDLE, element_name)
         if self.on_action_callback:
             try:
                 self.on_action_callback(ActionName.IDLE, element_name)
@@ -62,76 +416,18 @@ class HistoryService:
 
     def reset(self):
         self.actions.clear()
+        self.last_action_result = None
+        if self.step_tracker:
+            self.step_tracker.reset()
 
     def calculate_score(self, algorithm: Algorithm) -> dict:
-        """
-        Exact formula from ExamineResultProperties.cs and HistoryService.cs:
-        PercentageOfEthalonActionsInUserActions = ethalonActionsInUserActionsCount / ethalonActionsCount
-        PercentageOfEthalonActionsRightOrderInUserActions = rightOrderOfUserActionsCount / ethalonActionsInUserActionsCount
-        Value = round(PercentageOfEthalon * PercentageOfRightOrder * 5 - WrongActionsCount)
-        """
-        ethalon_actions = [a for a in algorithm.actions if a.use_in_examine_check]
-        ethalon_count = len(ethalon_actions)
-        if ethalon_count == 0:
-            return {"score": 5, "details": "Нет эталонных действий для проверки"}
+        if self.step_tracker and self.step_tracker.algorithm == algorithm:
+            return self.step_tracker.get_score()
 
-        previous_right_action_index = 0
-        ethalon_in_user_count = 0
-        right_order_count = 0
-        wrong_actions_count = 0
-        last_wrong_element: Optional[str] = None
-        is_revert = False
-
-        for user_action_name, user_el_name in self.actions:
-            action_is_right = False
-            for j, ethalon_action in enumerate(algorithm.actions):
-                if (
-                    ethalon_action.name == user_action_name
-                    and ethalon_action.parent_element_name == user_el_name
-                    and ethalon_action.use_in_examine_check
-                ):
-                    ethalon_in_user_count += 1
-                    action_is_right = True
-                    if j >= previous_right_action_index:
-                        previous_right_action_index = j
-                        right_order_count += 1
-                    break
-
-            if action_is_right:
-                last_wrong_element = None
-                is_revert = False
-            elif user_action_name == ActionName.CLICK:
-                # Если курсант нажал не на тот элемент, но не совершал других действий
-                # и сразу вернул его в исходное положение (повторное нажатие на тот же неверный элемент),
-                # засчитывается только 1 ошибка, а не 2!
-                if last_wrong_element == user_el_name and not is_revert:
-                    is_revert = True
-                else:
-                    wrong_actions_count += 1
-                    last_wrong_element = user_el_name
-                    is_revert = False
-
-        if ethalon_in_user_count > ethalon_count:
-            ethalon_in_user_count = ethalon_count
-
-        if right_order_count > ethalon_in_user_count:
-            right_order_count = ethalon_in_user_count
-
-        pct_ethalon = (ethalon_in_user_count / ethalon_count) if ethalon_count > 0 else 1.0
-        pct_order = (right_order_count / ethalon_in_user_count) if ethalon_in_user_count > 0 else 0.0
-
-        raw_score = pct_ethalon * pct_order * 5.0 - wrong_actions_count
-        score = max(1, min(5, int(round(raw_score))))
-
-        return {
-            "score": score,
-            "raw_score": raw_score,
-            "pct_ethalon": pct_ethalon,
-            "pct_order": pct_order,
-            "wrong_actions": wrong_actions_count,
-            "total_user_actions": len(self.actions),
-            "ethalon_count": ethalon_count,
-        }
+        tracker = StepTracker(algorithm)
+        for act_name, el_name in self.actions:
+            tracker.on_action(act_name, el_name)
+        return tracker.get_score()
 
 class HintService:
     def __init__(self):

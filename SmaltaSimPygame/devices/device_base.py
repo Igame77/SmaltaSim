@@ -1,7 +1,7 @@
 import pygame
 from typing import List, Dict, Optional, Any
 from core.element_base import ElementBase
-from core.algorithm_service import Algorithm, HistoryService, HintService
+from core.algorithm_service import Algorithm, HistoryService, HintService, StepTracker
 from config import CANVAS_WIDTH, CANVAS_HEIGHT
 
 class DeviceBase:
@@ -18,6 +18,7 @@ class DeviceBase:
         
         self.history_service = HistoryService()
         self.hint_service = HintService()
+        self.step_tracker: Optional[StepTracker] = None
         self.current_algorithm: Optional[Algorithm] = None
 
     def add_element(self, element: ElementBase):
@@ -85,8 +86,11 @@ class DeviceBase:
     def apply_algorithm(self, algorithm: Algorithm):
         self.current_algorithm = algorithm
         self.current_page_key = self.first_page_key
+        self.step_tracker = StepTracker(algorithm, self)
         self.history_service.reset()
+        self.history_service.step_tracker = self.step_tracker
         self.hint_service.reset()
+        self.hint_service.step_tracker = self.step_tracker
 
         # Cancel any running delayed dependencies and reset element interaction states
         for el in self.elements:

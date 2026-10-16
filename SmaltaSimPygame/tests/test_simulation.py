@@ -213,13 +213,127 @@ def test_full_prep_algorithm_execution():
     for action in algo.actions:
         el = dev.get_element_by_name(action.parent_element_name)
         assert el is not None
-        dev.history_service.record_click(action.parent_element_name)
         if action.expected_value is not None:
             el.set_value(action.expected_value)
+        dev.history_service.record_click(action.parent_element_name)
 
     res = dev.history_service.calculate_score(algo)
     assert res["score"] == 5
     assert res["wrong_actions"] == 0
     assert res["pct_ethalon"] == 1.0
     assert res["pct_order"] == 1.0
+
+def test_out_of_order_action_counts_as_mistake():
+    dev = create_smalta_device()
+    algo = get_smalta_algorithms()[0]
+    dev.apply_algorithm(algo)
+    tracker = dev.step_tracker
+    assert tracker is not None
+    assert tracker.current_step_idx == 0
+
+    # Expected step 0: lo01p_thumbler_light
+    # Student clicks step 4 out-of-order: lo01p_thumbler_4channel
+    el4 = dev.get_element_by_name("lo01p_thumbler_4channel")
+    el4.set_value(1)
+    res = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_4channel", 1)
+
+    assert res.is_mistake is True
+    assert tracker.wrong_actions_count == 1
+    assert tracker.current_step_idx == 0  # Did not jump forward!
+
+    # Immediate revert
+    el4.set_value(0)
+    res_revert = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_4channel", 0)
+    assert res_revert.is_revert is True
+    assert tracker.wrong_actions_count == 1  # Deduplicated!
+
+def test_breaking_earlier_step_drops_progress_and_restores():
+    dev = create_smalta_device()
+    algo = get_smalta_algorithms()[0]
+    dev.apply_algorithm(algo)
+    tracker = dev.step_tracker
+    assert tracker is not None
+
+    # Complete first 5 steps (0..4)
+    for i in range(5):
+        act = tracker.examine_actions[i]
+        el = dev.get_element_by_name(act.parent_element_name)
+        el.set_value(act.expected_value)
+        res = tracker.on_action(ActionName.CLICK, act.parent_element_name, act.expected_value)
+        assert res.is_valid_step is True
+
+    assert tracker.current_step_idx == 5
+    assert tracker.max_reached_step_idx == 5
+    assert tracker.wrong_actions_count == 0
+
+    # Student returns to step 0 and turns off lo01p_thumbler_light (1 -> 0)
+    el0 = dev.get_element_by_name("lo01p_thumbler_light")
+    el0.set_value(0)
+    res_break = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_light", 0)
+
+    # Must be counted as an error and progress dropped to step 0!
+    assert res_break.is_mistake is True
+    assert tracker.wrong_actions_count == 1
+    assert tracker.current_step_idx == 0
+    assert tracker.max_reached_step_idx == 5
+
+    # Student returns lo01p_thumbler_light back to 1
+    el0.set_value(1)
+    res_restore = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_light", 1)
+
+    # Must be restored to step 5 without adding a new error!
+    assert res_restore.is_mistake is False
+    assert res_restore.is_restoration is True
+    assert tracker.wrong_actions_count == 1
+    assert tracker.current_step_idx == 5
+
+def test_multiple_broken_steps_sequential_restoration():
+    dev = create_smalta_device()
+    algo = get_smalta_algorithms()[0]
+    dev.apply_algorithm(algo)
+    tracker = dev.step_tracker
+    assert tracker is not None
+
+    # Complete first 5 steps (0..4)
+    for i in range(5):
+        act = tracker.examine_actions[i]
+        el = dev.get_element_by_name(act.parent_element_name)
+        el.set_value(act.expected_value)
+        tracker.on_action(ActionName.CLICK, act.parent_element_name, act.expected_value)
+
+    assert tracker.current_step_idx == 5
+
+    # Break step 2 (lo01p_thumbler_2channel -> 0)
+    el2 = dev.get_element_by_name("lo01p_thumbler_2channel")
+    el2.set_value(0)
+    res1 = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_2channel", 0)
+    assert res1.is_mistake is True
+    assert tracker.current_step_idx == 2
+    assert tracker.wrong_actions_count == 1
+
+    # Break step 0 (lo01p_thumbler_light -> 0)
+    el0 = dev.get_element_by_name("lo01p_thumbler_light")
+    el0.set_value(0)
+    res2 = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_light", 0)
+    assert res2.is_mistake is True
+    assert tracker.current_step_idx == 0
+    assert tracker.wrong_actions_count == 2
+
+    # Fix step 0 (lo01p_thumbler_light -> 1)
+    el0.set_value(1)
+    res3 = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_light", 1)
+    assert res3.is_mistake is False
+    # Step 0 is fixed, but step 2 is still broken!
+    assert tracker.current_step_idx == 2
+    assert tracker.wrong_actions_count == 2
+
+    # Fix step 2 (lo01p_thumbler_2channel -> 1)
+    el2.set_value(1)
+    res4 = tracker.on_action(ActionName.CLICK, "lo01p_thumbler_2channel", 1)
+    assert res4.is_mistake is False
+    assert res4.is_restoration is True
+    # All earlier steps are now restored! Returns to step 5!
+    assert tracker.current_step_idx == 5
+    assert tracker.wrong_actions_count == 2
+
 
