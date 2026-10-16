@@ -5,6 +5,12 @@ from config import (
     COLOR_BUTTON_BORDER, COLOR_TEXT, COLOR_TEXT_DIM
 )
 
+UI_FONT_FAMILIES = ["segoeui", "calibri", "arial", "tahoma"]
+
+def get_ui_font(size: int, bold: bool = False, italic: bool = False) -> pygame.font.Font:
+    """Возвращает сглаженный системный шрифт Windows с поддержкой кириллицы (Segoe UI / Calibri)."""
+    return pygame.font.SysFont(UI_FONT_FAMILIES, size, bold=bold, italic=italic)
+
 class UIButton:
     def __init__(
         self,
@@ -26,9 +32,9 @@ class UIButton:
         self.is_hovered = False
         self.is_pressed = False
         self._fonts = {
-            font_size: pygame.font.SysFont("Arial", font_size, bold=True),
-            font_size - 2: pygame.font.SysFont("Arial", max(10, font_size - 2), bold=True),
-            font_size - 4: pygame.font.SysFont("Arial", max(9, font_size - 4), bold=True),
+            font_size: get_ui_font(font_size, bold=True),
+            font_size - 2: get_ui_font(max(10, font_size - 2), bold=True),
+            font_size - 4: get_ui_font(max(9, font_size - 4), bold=True),
         }
 
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -97,8 +103,8 @@ class ModalDialog:
     ):
         self.title = title
         self.raw_message = message
-        self.title_font = pygame.font.SysFont("Arial", 20, bold=True)
-        self.body_font = pygame.font.SysFont("Arial", 15)
+        self.title_font = get_ui_font(20, bold=True)
+        self.body_font = get_ui_font(15)
 
         # Auto-wrap message text to fit within dialog width
         max_msg_w = width - 60

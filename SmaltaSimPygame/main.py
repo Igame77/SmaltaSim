@@ -36,7 +36,10 @@ class SimulatorApp:
         # Display with hardware scaling and resizable/fullscreen support
         self.is_fullscreen = False
         flags = pygame.SCALED | pygame.RESIZABLE
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
+        try:
+            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
+        except Exception:
+            self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.clock = pygame.time.Clock()
 
         # Load Menu Background
@@ -89,29 +92,31 @@ class SimulatorApp:
         self._build_main_menu_buttons()
         self.btn_fullscreen = UIButton(
             pygame.Rect(SCREEN_WIDTH - 170, 18, 145, 34),
-            "⛶ На весь экран",
+            "На весь экран",
             callback=self.toggle_fullscreen,
             font_size=13,
-            bg_color=(45, 60, 75)
+            bg_color=(45, 60, 75),
+            border_radius=6
         )
         self.btn_sim_fullscreen = UIButton(
             pygame.Rect(SCREEN_WIDTH - 60, 4, 46, 28),
-            "⛶",
+            "[ ]",
             callback=self.toggle_fullscreen,
-            font_size=16,
-            bg_color=(40, 52, 65)
+            font_size=14,
+            bg_color=(40, 52, 65),
+            border_radius=4
         )
 
     def toggle_fullscreen(self):
         self.is_fullscreen = not self.is_fullscreen
         pygame.display.toggle_fullscreen()
-        self.btn_fullscreen.text = "🗗 В окно" if self.is_fullscreen else "⛶ На весь экран"
+        self.btn_fullscreen.text = "В окно" if self.is_fullscreen else "На весь экран"
 
     def _build_main_menu_buttons(self):
-        btn_w, btn_h = 240, 52
+        btn_w, btn_h = 250, 54
         start_x = 100
         start_y = 280
-        gap = 22
+        gap = 20
 
         self.menu_buttons = [
             UIButton(
@@ -119,28 +124,32 @@ class SimulatorApp:
                 "Обучение",
                 callback=lambda: self._open_device_selection(ApplicationMode.TRAINING),
                 font_size=18,
-                bg_color=(35, 110, 160)
+                bg_color=(35, 110, 160),
+                border_radius=6
             ),
             UIButton(
                 pygame.Rect(start_x, start_y + (btn_h + gap), btn_w, btn_h),
                 "Экзамен",
                 callback=self._open_exam_auth_dialog,
                 font_size=18,
-                bg_color=(170, 95, 30)
+                bg_color=(170, 95, 30),
+                border_radius=6
             ),
             UIButton(
                 pygame.Rect(start_x, start_y + 2 * (btn_h + gap), btn_w, btn_h),
                 "Информация",
                 callback=self._show_info_dialog,
-                font_size=17,
-                bg_color=(50, 65, 80)
+                font_size=18,
+                bg_color=(50, 65, 80),
+                border_radius=6
             ),
             UIButton(
                 pygame.Rect(start_x, start_y + 3 * (btn_h + gap), btn_w, btn_h),
                 "Выход",
                 callback=self.quit,
-                font_size=17,
-                bg_color=(120, 45, 45)
+                font_size=18,
+                bg_color=(120, 45, 45),
+                border_radius=6
             )
         ]
 

@@ -128,6 +128,8 @@ def get_local_ip() -> str:
     return get_primary_lan_ip()
 
 class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         # Отключаем спам в консоль
         pass
@@ -382,11 +384,20 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
     def _serve_sse_stream(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache, no-transform")
         self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
+
+        # Стартовое заполнение буфера для принудительного сброса в браузерах Chromium/Edge и через прокси
+        try:
+            self.wfile.write(b": " + b" " * 2048 + b"\n\n")
+            self.wfile.write(b": ping\n\n")
+            self.wfile.flush()
+        except Exception:
+            return
 
         q = queue.Queue()
         with server_state.lock:
@@ -394,14 +405,25 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
         # Отправляем начальное состояние
         init_data = f"event: init\ndata: {json.dumps({'students': server_state.get_all_students_list()}, ensure_ascii=False)}\n\n"
-        self.wfile.write(init_data.encode('utf-8'))
-        self.wfile.flush()
+        try:
+            self.wfile.write(init_data.encode('utf-8'))
+            self.wfile.flush()
+        except Exception:
+            with server_state.lock:
+                if q in server_state.sse_clients:
+                    server_state.sse_clients.remove(q)
+            return
 
         try:
             while True:
-                msg = q.get()
-                self.wfile.write(msg.encode('utf-8'))
-                self.wfile.flush()
+                try:
+                    msg = q.get(timeout=15.0)
+                    self.wfile.write(msg.encode('utf-8'))
+                    self.wfile.flush()
+                except queue.Empty:
+                    # Регулярный keep-alive пинг для исключения таймаута TCP
+                    self.wfile.write(b": keep-alive\n\n")
+                    self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
@@ -1009,59 +1031,119 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
     let studentsMap = {{}};
     let currentModalStudentId = null;
     let currentModalTab = 'log';
+    let sseActive = false;
 
-    // Подключение к Server-Sent Events (SSE)
+    // 1. Мгновенная синхронизация через REST (не ждет SSE-рукопожатия)
+    async function syncStudentsREST() {{
+      try {{
+        const resp = await fetch('/api/students');
+        if (resp.ok) {{
+          const data = await resp.json();
+          if (data && Array.isArray(data.students)) {{
+            studentsMap = {{}};
+            data.students.forEach(s => studentsMap[s.student_id] = s);
+            renderStudents();
+            if (!sseActive) {{
+              const meta = document.getElementById('grid-meta');
+              if (meta) meta.innerText = 'Связь активна (REST опрос)';
+            }}
+          }}
+        }}
+      }} catch (err) {{
+        if (!sseActive) {{
+          const meta = document.getElementById('grid-meta');
+          if (meta) meta.innerText = 'Сервер недоступен (повтор...)';
+        }}
+      }}
+    }}
+
+    // 2. Подключение к Server-Sent Events (SSE)
     function initSSE() {{
-      const evtSource = new EventSource('/api/stream');
+      // Сразу подгружаем текущих студентов
+      syncStudentsREST();
 
-      evtSource.onmessage = function(e) {{}};
-
-      evtSource.addEventListener('init', function(e) {{
-        const data = JSON.parse(e.data);
-        studentsMap = {{}};
-        data.students.forEach(s => studentsMap[s.student_id] = s);
-        renderStudents();
-        document.getElementById('grid-meta').innerText = 'Связь активна (Live SSE)';
-      }});
-
-      evtSource.addEventListener('student_update', function(e) {{
-        const s = JSON.parse(e.data);
-        studentsMap[s.student_id] = s;
-        renderStudents();
-        if (currentModalStudentId === s.student_id) {{
-          updateModalContent();
+      try {{
+        if (window.evtSource) {{
+          try {{ window.evtSource.close(); }} catch(e) {{}}
         }}
-      }});
 
-      evtSource.addEventListener('screenshot_update', function(e) {{
-        const data = JSON.parse(e.data);
-        if (studentsMap[data.student_id]) {{
-          studentsMap[data.student_id].last_screenshot_url = data.screenshot.url;
-          studentsMap[data.student_id].last_screenshot_time = data.screenshot.timestamp;
+        const evtSource = new EventSource('/api/stream');
+        window.evtSource = evtSource;
+
+        evtSource.onopen = function() {{
+          sseActive = true;
+          const meta = document.getElementById('grid-meta');
+          if (meta) meta.innerText = 'Связь активна (Live SSE)';
+        }};
+
+        evtSource.onmessage = function(e) {{}};
+
+        evtSource.addEventListener('init', function(e) {{
+          sseActive = true;
+          try {{
+            const data = JSON.parse(e.data);
+            studentsMap = {{}};
+            data.students.forEach(s => studentsMap[s.student_id] = s);
+            renderStudents();
+            const meta = document.getElementById('grid-meta');
+            if (meta) meta.innerText = 'Связь активна (Live SSE)';
+          }} catch(err) {{
+            console.error('SSE init error:', err);
+          }}
+        }});
+
+        evtSource.addEventListener('student_update', function(e) {{
+          sseActive = true;
+          try {{
+            const s = JSON.parse(e.data);
+            studentsMap[s.student_id] = s;
+            renderStudents();
+            if (currentModalStudentId === s.student_id) {{
+              updateModalContent();
+            }}
+          }} catch(err) {{}}
+        }});
+
+        evtSource.addEventListener('screenshot_update', function(e) {{
+          try {{
+            const data = JSON.parse(e.data);
+            if (studentsMap[data.student_id]) {{
+              studentsMap[data.student_id].last_screenshot_url = data.screenshot.url;
+              studentsMap[data.student_id].last_screenshot_time = data.screenshot.timestamp;
+              renderStudents();
+              if (currentModalStudentId === data.student_id && currentModalTab === 'shots') {{
+                loadStudentScreenshots(data.student_id);
+              }}
+            }}
+          }} catch(err) {{}}
+        }});
+
+        evtSource.addEventListener('student_event', function(e) {{
+          try {{
+            const data = JSON.parse(e.data);
+            if (studentsMap[data.student_id]) {{
+              if (currentModalStudentId === data.student_id && currentModalTab === 'log') {{
+                loadStudentEvents(data.student_id);
+              }}
+            }}
+          }} catch(err) {{}}
+        }});
+
+        evtSource.addEventListener('reset', function() {{
+          studentsMap = {{}};
           renderStudents();
-          if (currentModalStudentId === data.student_id && currentModalTab === 'shots') {{
-            loadStudentScreenshots(data.student_id);
-          }}
-        }}
-      }});
+        }});
 
-      evtSource.addEventListener('student_event', function(e) {{
-        const data = JSON.parse(e.data);
-        if (studentsMap[data.student_id]) {{
-          if (currentModalStudentId === data.student_id && currentModalTab === 'log') {{
-            loadStudentEvents(data.student_id);
-          }}
-        }}
-      }});
-
-      evtSource.addEventListener('reset', function() {{
-        studentsMap = {{}};
-        renderStudents();
-      }});
-
-      evtSource.onerror = function() {{
-        document.getElementById('grid-meta').innerText = 'Переподключение к серверу...';
-      }};
+        evtSource.onerror = function() {{
+          sseActive = false;
+          const meta = document.getElementById('grid-meta');
+          if (meta) meta.innerText = 'Связь активна (резервный опрос)...';
+          syncStudentsREST();
+        }};
+      }} catch (err) {{
+        console.warn('SSE creation error:', err);
+        sseActive = false;
+      }}
     }}
 
     function renderStudents() {{
@@ -1349,9 +1431,16 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       }}
     }});
 
-    window.onload = function() {{
+    function startDashboard() {{
       initSSE();
-    }};
+      setInterval(syncStudentsREST, 2500);
+    }}
+
+    if (document.readyState === 'loading') {{
+      document.addEventListener('DOMContentLoaded', startDashboard);
+    }} else {{
+      startDashboard();
+    }}
   </script>
 </body>
 </html>

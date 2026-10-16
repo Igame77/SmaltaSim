@@ -79,7 +79,7 @@ class StudentClient:
                         s.settimeout(0.15)
                         data, addr = s.recvfrom(1024)
                         resp = data.decode('utf-8', errors='ignore').strip()
-                        if resp.startswith(DISCOVERY_MAGIC_RESPONSE):
+                        if resp.startswith(DISCOVERY_MAGIC_RESPONSE) or resp.startswith("SmaltaSim_TEACHER_BEACON"):
                             parts = resp.split(':')
                             found_ip = addr[0]
                             found_port = DEFAULT_SERVER_PORT

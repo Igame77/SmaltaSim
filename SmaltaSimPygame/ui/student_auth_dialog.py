@@ -6,7 +6,7 @@ import time
 import pygame
 from typing import Optional, Callable, Dict, Any, Tuple
 from config import SCREEN_WIDTH, SCREEN_HEIGHT, COLOR_TEXT, COLOR_TEXT_DIM
-from ui.ui_widgets import UIButton
+from ui.ui_widgets import UIButton, get_ui_font
 from network.student_client import StudentClient
 from network.exam_protocol import DEFAULT_SERVER_PORT
 from network.network_utils import ping_server
@@ -20,8 +20,8 @@ class TextInputField:
         self.value = value
         self.placeholder = placeholder
         self.is_focused = False
-        self.font = pygame.font.SysFont("Arial", 15)
-        self.label_font = pygame.font.SysFont("Arial", 13, bold=True)
+        self.font = get_ui_font(15)
+        self.label_font = get_ui_font(13, bold=True)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -123,7 +123,7 @@ class StudentAuthDialog:
         # Кнопки
         self.btn_search = UIButton(
             pygame.Rect(field_x + field_w - 130, self.y + 225, 130, fh),
-            "🔍 Поиск",
+            "Поиск",
             callback=self.start_auto_discovery,
             font_size=13,
             bg_color=(35, 65, 95)
@@ -146,8 +146,8 @@ class StudentAuthDialog:
             bg_color=(75, 80, 90)
         )
 
-        self.title_font = pygame.font.SysFont("Arial", 20, bold=True)
-        self.sub_font = pygame.font.SysFont("Arial", 13)
+        self.title_font = get_ui_font(20, bold=True)
+        self.sub_font = get_ui_font(13)
 
         # Фоновый поиск сервера
         self.start_auto_discovery()
@@ -186,17 +186,25 @@ class StudentAuthDialog:
                 self.f_server_ip.value = ip
                 self.client.set_server(ip, port)
                 self.server_found = True
-                self.status_msg = f"✓ Сервер преподавателя найден: {ip}:{port}"
+                self.status_msg = f"[OK] Сервер преподавателя найден: {ip}:{port}"
                 self.status_color = (52, 211, 153)
                 return
 
-            # 2. Если UDP broadcast не ответил (например, изоляция Wi-Fi / AP Isolation),
-            # проверяем IP, уже введенный в поле
-            cur_ip = self.f_server_ip.value.strip()
-            if cur_ip and cur_ip != "127.0.0.1" and ping_server(cur_ip, DEFAULT_SERVER_PORT, timeout=0.8):
+            # 2. Если UDP broadcast не ответил, проверяем IP, уже введенный в поле (или 127.0.0.1)
+            cur_ip = self.f_server_ip.value.strip() or "127.0.0.1"
+            if ping_server(cur_ip, DEFAULT_SERVER_PORT, timeout=0.8):
+                self.f_server_ip.value = cur_ip
                 self.client.set_server(cur_ip, DEFAULT_SERVER_PORT)
                 self.server_found = True
-                self.status_msg = f"✓ Связь с сервером подтверждена: {cur_ip}:{DEFAULT_SERVER_PORT}"
+                self.status_msg = f"[OK] Связь с сервером подтверждена: {cur_ip}:{DEFAULT_SERVER_PORT}"
+                self.status_color = (52, 211, 153)
+                return
+
+            if cur_ip != "127.0.0.1" and ping_server("127.0.0.1", DEFAULT_SERVER_PORT, timeout=0.5):
+                self.f_server_ip.value = "127.0.0.1"
+                self.client.set_server("127.0.0.1", DEFAULT_SERVER_PORT)
+                self.server_found = True
+                self.status_msg = f"[OK] Локальный сервер найден: 127.0.0.1:{DEFAULT_SERVER_PORT}"
                 self.status_color = (52, 211, 153)
                 return
 
@@ -218,11 +226,11 @@ class StudentAuthDialog:
             if ping_server(target_ip, DEFAULT_SERVER_PORT, timeout=1.2):
                 self.client.set_server(target_ip, DEFAULT_SERVER_PORT)
                 self.server_found = True
-                self.status_msg = f"✓ Связь с сервером подтверждена: {target_ip}:{DEFAULT_SERVER_PORT}"
+                self.status_msg = f"[OK] Связь с сервером подтверждена: {target_ip}:{DEFAULT_SERVER_PORT}"
                 self.status_color = (52, 211, 153)
             else:
                 self.server_found = False
-                self.status_msg = f"✕ Сервер {target_ip} недоступен (проверьте IP или Брандмауэр)"
+                self.status_msg = f"[!] Сервер {target_ip} недоступен (проверьте IP или Брандмауэр)"
                 self.status_color = (239, 68, 68)
 
         threading.Thread(target=ping_worker, daemon=True).start()
@@ -348,8 +356,8 @@ class WaitingForTeacherDialog:
             bg_color=(75, 80, 90)
         )
 
-        self.title_font = pygame.font.SysFont("Arial", 19, bold=True)
-        self.body_font = pygame.font.SysFont("Arial", 14)
+        self.title_font = get_ui_font(19, bold=True)
+        self.body_font = get_ui_font(14)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if self.btn_start.handle_event(event):
