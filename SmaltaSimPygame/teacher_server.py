@@ -558,8 +558,13 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       font-weight: 600;
       cursor: pointer;
       border: 1px solid transparent;
-      transition: all 0.15s ease;
+      transition: all 0.1s cubic-bezier(0.4, 0, 0.2, 1);
       text-decoration: none;
+      user-select: none;
+    }}
+    .btn:active {{
+      transform: scale(0.96) translateY(2px) !important;
+      filter: brightness(0.9);
     }}
     .btn-primary {{
       background: #2563eb;
@@ -1265,7 +1270,6 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
 
         <div class="card-actions">
           ${{s.status === 'WAITING' ? `<button class="btn btn-success btn-sm" onclick="sendStudentCommand('${{s.student_id}}', 'START_EXAM')">▶ Начать</button>` : ''}}
-          <button class="btn btn-outline btn-sm" onclick="sendStudentCommand('${{s.student_id}}', 'REQUEST_SCREENSHOT')">📸 Снимок</button>
           <button class="btn btn-primary btn-sm" onclick="openStudentModal('${{s.student_id}}')">📋 Журнал</button>
           ${{s.status === 'ACTIVE' || s.status === 'FOCUS_LOST' ? `<button class="btn btn-danger btn-sm" onclick="stopStudentExam('${{s.student_id}}', '${{s.full_name}}')">⏹ Стоп</button>` : ''}}
         </div>

@@ -32,6 +32,7 @@ class BigButton(ElementBase):
         self.dependency_secure_element_name = dependency_secure_element_name
         self.is_dependency_actions_running = False
         self._is_pressed = False
+        self._press_release_time = 0
         self._load_images()
 
     @classmethod
@@ -53,13 +54,22 @@ class BigButton(ElementBase):
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 self._is_pressed = True
+                self._press_release_time = pygame.time.get_ticks() + 160
                 self.interact()
                 return True
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             if self._is_pressed:
-                self._is_pressed = False
+                if pygame.time.get_ticks() >= self._press_release_time:
+                    self._is_pressed = False
+                    self.set_value(0, trigger_dependencies=False)
                 return True
         return False
+
+    def update(self, dt_ms: int):
+        if self._is_pressed and pygame.time.get_ticks() >= self._press_release_time:
+            if not pygame.mouse.get_pressed()[0]:
+                self._is_pressed = False
+                self.set_value(0, trigger_dependencies=False)
 
     def interact(self):
         # Check secure element lock
@@ -93,5 +103,6 @@ class BigButton(ElementBase):
             dep.execute(self.value, self.device.get_element_by_name, callback=on_action_done)
 
     def draw(self, surface: pygame.Surface):
-        surf = self._img_on if (self._is_pressed or self.value == 1) else self._img_off
+        # Кнопка упругая — визуально возвращается в исходное ненажатое положение
+        surf = self._img_on if self._is_pressed else self._img_off
         surface.blit(surf, (self.pos_left, self.pos_top))

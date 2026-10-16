@@ -43,6 +43,8 @@ class UIButton:
 
         if event.type == pygame.MOUSEMOTION:
             self.is_hovered = self.rect.collidepoint(event.pos)
+            if not self.is_hovered:
+                self.is_pressed = False
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 self.is_pressed = True
@@ -56,6 +58,10 @@ class UIButton:
         return False
 
     def draw(self, surface: pygame.Surface):
+        # Упругость кнопки: при нажатии визуально смещается на 2px вниз и возвращается при отпускании
+        offset_y = 2 if self.is_pressed else 0
+        draw_rect = pygame.Rect(self.rect.x, self.rect.y + offset_y, self.rect.width, self.rect.height)
+
         if not self.is_enabled:
             bg = (40, 45, 50)
             txt_col = COLOR_TEXT_DIM
@@ -73,8 +79,8 @@ class UIButton:
             txt_col = COLOR_TEXT
             border_col = COLOR_BUTTON_BORDER
 
-        pygame.draw.rect(surface, bg, self.rect, border_radius=self.border_radius)
-        pygame.draw.rect(surface, border_col, self.rect, width=1, border_radius=self.border_radius)
+        pygame.draw.rect(surface, bg, draw_rect, border_radius=self.border_radius)
+        pygame.draw.rect(surface, border_col, draw_rect, width=1, border_radius=self.border_radius)
 
         # Pick font that fits inside button without overflow
         target_font = self._fonts.get(self.font_size)
@@ -86,8 +92,8 @@ class UIButton:
             target_font = self._fonts.get(self.font_size - 4, target_font)
             text_surf = target_font.render(self.text, True, txt_col)
 
-        tx = self.rect.x + (self.rect.width - text_surf.get_width()) // 2
-        ty = self.rect.y + (self.rect.height - text_surf.get_height()) // 2
+        tx = draw_rect.x + (draw_rect.width - text_surf.get_width()) // 2
+        ty = draw_rect.y + (draw_rect.height - text_surf.get_height()) // 2
         surface.blit(text_surf, (tx, ty))
 
 
@@ -99,7 +105,9 @@ class MenuCardButton:
         subtitle: str,
         callback: Optional[Callable[[], None]] = None,
         accent_color: Tuple[int, int, int] = (14, 165, 233),
-        border_radius: int = 8
+        border_radius: int = 8,
+        img_normal: Optional[pygame.Surface] = None,
+        img_hover: Optional[pygame.Surface] = None
     ):
         self.rect = rect
         self.title = title
@@ -107,6 +115,8 @@ class MenuCardButton:
         self.callback = callback
         self.accent_color = accent_color
         self.border_radius = border_radius
+        self.img_normal = img_normal
+        self.img_hover = img_hover
         self.is_hovered = False
         self.is_pressed = False
         self.font_title = get_ui_font(20, bold=True)
@@ -115,6 +125,8 @@ class MenuCardButton:
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEMOTION:
             self.is_hovered = self.rect.collidepoint(event.pos)
+            if not self.is_hovered:
+                self.is_pressed = False
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if self.rect.collidepoint(event.pos):
                 self.is_pressed = True
@@ -128,6 +140,16 @@ class MenuCardButton:
         return False
 
     def draw(self, surface: pygame.Surface):
+        # Упругость кнопки: при нажатии смещение на 2px вниз, при отпускании возврат
+        offset_y = 2 if self.is_pressed else 0
+        draw_x = self.rect.x
+        draw_y = self.rect.y + offset_y
+
+        if self.img_normal:
+            img = self.img_hover if (self.is_hovered and self.img_hover) else self.img_normal
+            surface.blit(img, (draw_x, draw_y))
+            return
+
         card_surf = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
         if self.is_pressed:
             bg_col = (25, 36, 56, 240)
@@ -151,7 +173,7 @@ class MenuCardButton:
         card_surf.blit(t_title, (24, 14))
         card_surf.blit(t_sub, (24, 44))
 
-        surface.blit(card_surf, (self.rect.x, self.rect.y))
+        surface.blit(card_surf, (draw_x, draw_y))
 
 
 class ModalDialog:

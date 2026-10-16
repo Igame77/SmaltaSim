@@ -86,3 +86,15 @@ class Assets:
     WHEEL_FLAT = ASSETS_DIR / "WheelFlat.png"
     WHEEL_POINT = ASSETS_DIR / "WheelPoint.png"
     TROLL_FACE = ASSETS_DIR / "TrollFace.png"
+
+    # UI Image Plates
+    UI_HEADER_PLATE = ASSETS_DIR / "ui" / "header_plate.png"
+    UI_DEVICES_PANEL = ASSETS_DIR / "ui" / "devices_panel_plate.png"
+    UI_BTN_TRAINING_NORM = ASSETS_DIR / "ui" / "menu_btn_training_normal.png"
+    UI_BTN_TRAINING_HOV = ASSETS_DIR / "ui" / "menu_btn_training_hover.png"
+    UI_BTN_EXAM_NORM = ASSETS_DIR / "ui" / "menu_btn_exam_normal.png"
+    UI_BTN_EXAM_HOV = ASSETS_DIR / "ui" / "menu_btn_exam_hover.png"
+    UI_BTN_INFO_NORM = ASSETS_DIR / "ui" / "menu_btn_info_normal.png"
+    UI_BTN_INFO_HOV = ASSETS_DIR / "ui" / "menu_btn_info_hover.png"
+    UI_BTN_EXIT_NORM = ASSETS_DIR / "ui" / "menu_btn_exit_normal.png"
+    UI_BTN_EXIT_HOV = ASSETS_DIR / "ui" / "menu_btn_exit_hover.png"
