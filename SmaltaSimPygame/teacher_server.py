@@ -1282,7 +1282,7 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
     }}
 
     function stopStudentExam(studentId, studentName) {{
-      if (confirm(`Принудительно завершить экзамен для курсанта ${{studentName}}?\nТекущий прогресс и оценка будут сохранены.`)) {{
+      if (confirm("Принудительно завершить экзамен для курсанта " + studentName + "? (Текущий прогресс и оценка будут сохранены)")) {{
         sendStudentCommand(studentId, 'STOP_EXAM');
       }}
     }}
@@ -1291,18 +1291,18 @@ class TeacherHTTPRequestHandler(BaseHTTPRequestHandler):
       const list = Object.values(studentsMap);
       const hasActive = list.some(s => s.status === 'ACTIVE' || s.status === 'FOCUS_LOST');
       if (hasActive) {{
-        if (confirm('Принудительно завершить экзамен для всех сдающих курсантов?\nТекущий прогресс и оценки будут сохранены.')) {{
+        if (confirm("Принудительно завершить экзамен для всех сдающих курсантов? (Текущий прогресс и оценки будут сохранены)")) {{
           fetch('/api/exam/stop_all', {{ method: 'POST' }});
         }}
       }} else {{
-        if (confirm('Начать экзамен для всех ожидающих курсантов?')) {{
+        if (confirm("Начать экзамен для всех ожидающих курсантов?")) {{
           fetch('/api/exam/start_all', {{ method: 'POST' }});
         }}
       }}
     }}
 
     function clearExamData() {{
-      if (confirm('Очистить список курсантов на сервере?')) {{
+      if (confirm("Очистить список курсантов на сервере?")) {{
         fetch('/api/exam/clear', {{ method: 'POST' }});
       }}
     }}
