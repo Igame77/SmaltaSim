@@ -32,7 +32,9 @@ def build_exe():
         "--icon", str(ICON_PATH),
         "--add-data", f"{ASSETS_DIR};assets",
         "--collect-all", "pygame",
+        "--collect-all", "PIL",
         "--hidden-import", "pygame",
+        "--hidden-import", "PIL",
         str(BASE_DIR / "main.py")
     ]
     print("Выполнение команды:", " ".join(cmd_onedir))
@@ -50,7 +52,9 @@ def build_exe():
         "--icon", str(ICON_PATH),
         "--add-data", f"{ASSETS_DIR};assets",
         "--collect-all", "pygame",
+        "--collect-all", "PIL",
         "--hidden-import", "pygame",
+        "--hidden-import", "PIL",
         str(BASE_DIR / "main.py")
     ]
     print("Выполнение команды:", " ".join(cmd_onefile))

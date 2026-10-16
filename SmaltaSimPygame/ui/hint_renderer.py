@@ -114,36 +114,33 @@ class HintRenderer:
         card_x = (1600 - card_w) // 2
         card_y = 42
 
-        # Shadow
-        shadow_rect = pygame.Rect(card_x + 3, card_y + 3, card_w, card_h)
-        pygame.draw.rect(surface, (5, 8, 12), shadow_rect, border_radius=8)
+        # Center: Hint Text or Mistake Alert
+        text_avail_w = self.help_button_rect.x - (card_x + 10 + 90 + 8 + 170) - 24
+        is_flashing_mistake = (ticks < hs.mistake_flash_until_ms)
+        if is_flashing_mistake:
+            pulse_alert = int(210 + 45 * math.sin(ticks * 0.015))
+            alert_prefix = f"⚠ {hs.last_mistake_text} "
+            curr_text = hs.get_current_hint_text()
+            full_text = alert_prefix + curr_text
+            wrapped = self._wrap_text(full_text, self.hud_text_font, max_width=text_avail_w)
+            t_color = (255, pulse_alert, 90)
+        else:
+            curr_text = hs.get_current_hint_text()
+            wrapped = self._wrap_text(curr_text, self.hud_text_font, max_width=text_avail_w)
+            t_color = (245, 250, 255)
 
-        # Card base
-        card_surf = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
-        card_surf.fill((14, 20, 28, 235))
-        surface.blit(card_surf, (card_x, card_y))
-
-        card_rect = pygame.Rect(card_x, card_y, card_w, card_h)
-        pygame.draw.rect(surface, border_color, card_rect, width=2, border_radius=8)
-
-        # Left 1: Step indicator capsule
-        curr_step = hs.current_action_index + 1
-        total_steps = len(hs.algorithm.actions) if hs.algorithm else 1
-        step_str = f"Шаг {curr_step}/{total_steps}"
-        step_surf = self.hud_step_font.render(step_str, True, (215, 230, 245))
-        step_w = step_surf.get_width() + 18
-        step_rect = pygame.Rect(card_x + 10, card_y + 11, step_w, 30)
-        pygame.draw.rect(surface, (28, 38, 50), step_rect, border_radius=6)
-        pygame.draw.rect(surface, (50, 70, 90), step_rect, width=1, border_radius=6)
-        surface.blit(step_surf, (step_rect.x + 9, step_rect.y + 7))
-
-        # Left 2: Level Badge
-        badge_surf = self.hud_badge_font.render(badge_label, True, badge_text_color)
-        badge_w = badge_surf.get_width() + 18
-        badge_rect = pygame.Rect(step_rect.right + 8, card_y + 11, badge_w, 30)
-        pygame.draw.rect(surface, badge_bg, badge_rect, border_radius=6)
-        pygame.draw.rect(surface, border_color, badge_rect, width=1, border_radius=6)
-        surface.blit(badge_surf, (badge_rect.x + 9, badge_rect.y + 7))
+        from ui.plate_renderer import render_hud_banner_plate
+        plate_surf, text_x = render_hud_banner_plate(
+            card_w, card_h,
+            step_str,
+            badge_label,
+            badge_bg,
+            badge_text_color,
+            border_color,
+            wrapped,
+            t_color
+        )
+        surface.blit(plate_surf, (card_x, card_y))
 
         # Right: Escalate Help Button
         btn_w = 185
@@ -163,39 +160,6 @@ class HintRenderer:
         pygame.draw.rect(surface, btn_border, self.help_button_rect, width=1, border_radius=6)
         b_surf = self.hud_btn_font.render(btn_label, True, btn_txt_col)
         surface.blit(b_surf, (self.help_button_rect.x + (btn_w - b_surf.get_width()) // 2, self.help_button_rect.y + 7))
-
-        # Center: Hint Text or Mistake Alert
-        text_avail_w = self.help_button_rect.x - badge_rect.right - 24
-        text_x = badge_rect.right + 14
-
-        is_flashing_mistake = (ticks < hs.mistake_flash_until_ms)
-        if is_flashing_mistake:
-            # Flashing mistake warning
-            pulse_alert = int(210 + 45 * math.sin(ticks * 0.015))
-            alert_prefix = f"⚠ {hs.last_mistake_text} "
-            curr_text = hs.get_current_hint_text()
-            full_text = alert_prefix + curr_text
-            
-            wrapped = self._wrap_text(full_text, self.hud_text_font, max_width=text_avail_w)
-            if len(wrapped) == 1:
-                t_surf = self.hud_text_font.render(wrapped[0], True, (255, pulse_alert, 90))
-                surface.blit(t_surf, (text_x, card_y + 16))
-            elif len(wrapped) >= 2:
-                t1 = self.hud_text_font.render(wrapped[0], True, (255, pulse_alert, 90))
-                t2 = self.hud_text_font.render(wrapped[1], True, (255, 240, 200))
-                surface.blit(t1, (text_x, card_y + 6))
-                surface.blit(t2, (text_x, card_y + 26))
-        else:
-            curr_text = hs.get_current_hint_text()
-            wrapped = self._wrap_text(curr_text, self.hud_text_font, max_width=text_avail_w)
-            if len(wrapped) == 1:
-                t_surf = self.hud_text_font.render(wrapped[0], True, (245, 250, 255))
-                surface.blit(t_surf, (text_x, card_y + 16))
-            elif len(wrapped) >= 2:
-                t1 = self.hud_text_font.render(wrapped[0], True, (245, 250, 255))
-                t2 = self.hud_text_font.render(wrapped[1], True, (220, 235, 250))
-                surface.blit(t1, (text_x, card_y + 6))
-                surface.blit(t2, (text_x, card_y + 26))
 
     def _draw_direct_bubble(self, surface: pygame.Surface, target_el, action, ticks: int, pulse: float):
         # Pulsing target highlight outline
@@ -217,6 +181,8 @@ class HintRenderer:
         info_line_surf = None
         if action.name == ActionName.INFO:
             info_line_surf = self.info_font.render("(Кликните по органу или нажмите Пробел)", True, (120, 220, 255))
+
+        from ui.plate_renderer import render_speech_bubble_plate, render_nav_banner_plate
 
         content_w = max(r.get_width() for r in rendered_lines) if rendered_lines else 100
         if info_line_surf:
@@ -247,10 +213,9 @@ class HintRenderer:
         shadow_rect = pygame.Rect(bx + 4, by + 4, bubble_w, bubble_h)
         pygame.draw.rect(surface, (5, 10, 15), shadow_rect, border_radius=6)
 
-        # Bubble background & border
-        bubble_rect = pygame.Rect(bx, by, bubble_w, bubble_h)
-        pygame.draw.rect(surface, (18, 28, 38), bubble_rect, border_radius=6)
-        pygame.draw.rect(surface, (0, 195, 235), bubble_rect, width=2, border_radius=6)
+        # Crisp pre-rendered speech bubble plate
+        b_plate = render_speech_bubble_plate(bubble_w, bubble_h, wrapped_lines, is_info=(action.name == ActionName.INFO))
+        surface.blit(b_plate, (bx, by))
 
         # Pointer arrow
         arrow_y = max(by + 14, min(by + bubble_h - 14, el_center_y))
@@ -262,17 +227,8 @@ class HintRenderer:
         elif side == "right":
             p1 = (bx + bubble_w, arrow_y - 6)
             p2 = (bx + bubble_w + 9, arrow_y)
-            p3 = (bx + bubble_w, arrow_y + 6)
+            p3 = (bx + bubble_w + 6)
             pygame.draw.polygon(surface, (0, 195, 235), [p1, p2, p3])
-
-        # Text lines
-        curr_ty = by + 9
-        for r in rendered_lines:
-            surface.blit(r, (bx + 12, curr_ty))
-            curr_ty += line_h
-
-        if info_line_surf:
-            surface.blit(info_line_surf, (bx + 12, curr_ty + 2))
 
     def _draw_page_navigation_hint(self, surface: pygame.Surface, device: DeviceBase, target_el):
         curr_idx = device.pages.index(device.current_page_key)
@@ -290,11 +246,6 @@ class HintRenderer:
         # Shadow
         pygame.draw.rect(surface, (5, 10, 15), (banner_x + 3, banner_y + 3, banner_w, banner_h), border_radius=6)
 
-        banner_rect = pygame.Rect(banner_x, banner_y, banner_w, banner_h)
-        pygame.draw.rect(surface, (25, 35, 45), banner_rect, border_radius=6)
-        pygame.draw.rect(surface, COLOR_WARNING, banner_rect, width=2, border_radius=6)
-
-        txt = self.font.render(nav_hint, True, (255, 235, 130))
-        tx = banner_x + (banner_w - txt.get_width()) // 2
-        ty = banner_y + (banner_h - txt.get_height()) // 2
-        surface.blit(txt, (tx, ty))
+        from ui.plate_renderer import render_nav_banner_plate
+        nav_plate = render_nav_banner_plate(banner_w, banner_h, nav_hint)
+        surface.blit(nav_plate, (banner_x, banner_y))

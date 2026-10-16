@@ -411,6 +411,8 @@ class SimulatorApp:
         self.entered_keys.clear()
         self._prev_wrong_actions = 0
         self._last_wrong_element = None
+        # Возврат всех органов управления (тумблеры, ручки, кнопки) в исходное положение
+        device.reset_all_elements(algorithm)
         device.apply_algorithm(algorithm)
         device.hint_service.start_training(algorithm, device)
 
@@ -522,24 +524,18 @@ class SimulatorApp:
 
         if self.is_god_mode:
             score = 5
-            details_str = "Активирован специальный режим отличника (GodMode)!\nОценка: 5 (Отлично)\nОшибок: 0"
+            details_str = "Активирован специальный режим отличника (GodMode)!\nОценка: 5\nОшибок: 0"
         else:
             res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
             score = res["score"]
             details_str = (
-                f"Итоговая оценка: {score} из 5\n"
+                f"Итоговая оценка: {score}\n"
                 f"Выполнено эталонных действий: {int(res['pct_ethalon'] * 100)}%\n"
                 f"Правильный порядок: {int(res['pct_order'] * 100)}%\n"
                 f"Ошибочных / лишних действий: {res['wrong_actions']}"
             )
 
-        grade_names = {
-            5: "ОТЛИЧНО (5)",
-            4: "ХОРОШО (4)",
-            3: "УДОВЛЕТВОРИТЕЛЬНО (3)",
-            2: "НЕУДОВЛЕТВОРИТЕЛЬНО (2)",
-        }
-        title = f"Результат: {grade_names.get(score, str(score))}"
+        title = f"Итоговая оценка: {score}"
 
         if self.is_network_exam:
             wrong_cnt = 0 if self.is_god_mode else res.get("wrong_actions", 0)
@@ -593,7 +589,7 @@ class SimulatorApp:
         if self.active_device and self.active_device.current_algorithm:
             if self.is_god_mode:
                 score = 5
-                details_str = "Активирован специальный режим отличника (GodMode)!\nОценка: 5 (Отлично)\nОшибок: 0"
+                details_str = "Активирован специальный режим отличника (GodMode)!\nОценка: 5\nОшибок: 0"
             else:
                 res = self.active_device.history_service.calculate_score(self.active_device.current_algorithm)
                 score = res["score"]
@@ -601,7 +597,7 @@ class SimulatorApp:
                 pct_order = res.get("pct_order", 0.0)
                 wrong_actions = res.get("wrong_actions", 0)
                 details_str = (
-                    f"Итоговая оценка: {score} из 5\n"
+                    f"Итоговая оценка: {score}\n"
                     f"Выполнено эталонных действий: {int(pct_ethalon * 100)}%\n"
                     f"Правильный порядок: {int(pct_order * 100)}%\n"
                     f"Ошибочных действий: {wrong_actions}"
@@ -643,13 +639,7 @@ class SimulatorApp:
             exit_to_menu()
             return
 
-        grade_names = {
-            5: "ОТЛИЧНО (5)",
-            4: "ХОРОШО (4)",
-            3: "УДОВЛЕТВОРИТЕЛЬНО (3)",
-            2: "НЕУДОВЛЕТВОРИТЕЛЬНО (2)",
-        }
-        title = f"Экзамен остановлен преподавателем: {grade_names.get(score, str(score))}"
+        title = f"Экзамен остановлен преподавателем (оценка: {score})"
         msg = "Экзамен был принудительно завершен преподавателем.\nТекущий прогресс и оценка сохранены в ведомость.\n\n" + details_str
         buttons = [
             ("В главное меню", exit_to_menu, (30, 130, 80)),
@@ -682,6 +672,7 @@ class SimulatorApp:
                             if isinstance(self.active_dialog, WaitingForTeacherDialog):
                                 self.active_dialog = None
                                 if hasattr(self, '_pending_device') and hasattr(self, '_pending_algo') and self._pending_device and self._pending_algo:
+                                    self._pending_device.reset_all_elements(self._pending_algo)
                                     self.start_simulation(self._pending_device, self._pending_algo)
                         elif cmd_type == "STOP_EXAM":
                             self._force_terminate_by_teacher()

@@ -273,6 +273,13 @@ class ModalDialog:
                     bg_color=color
                 )
                 self.ui_buttons.append(b)
+        from ui.plate_renderer import render_dialog_plate
+        self.plate_surface = render_dialog_plate(
+            self.title,
+            self.formatted_lines,
+            self.width,
+            self.height
+        )
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if not self.is_open:
@@ -296,30 +303,12 @@ class ModalDialog:
         overlay.fill((0, 0, 0, 165))
         surface.blit(overlay, (0, 0))
 
-        # Modal window background with shadow
+        # Modal window shadow
         shadow_rect = pygame.Rect(self.x + 6, self.y + 6, self.width, self.height)
-        pygame.draw.rect(surface, (10, 15, 20), shadow_rect, border_radius=8)
+        pygame.draw.rect(surface, (10, 15, 20), shadow_rect, border_radius=10)
 
-        pygame.draw.rect(surface, (40, 48, 56), self.rect, border_radius=8)
-        pygame.draw.rect(surface, (70, 85, 100), self.rect, width=2, border_radius=8)
-
-        # Title bar
-        title_surf = self.title_font.render(self.title, True, (245, 245, 250))
-        surface.blit(title_surf, (self.x + 25, self.y + 20))
-
-        pygame.draw.line(
-            surface, (60, 75, 90),
-            (self.x + 20, self.y + 54),
-            (self.x + self.width - 20, self.y + 54), 1
-        )
-
-        # Message lines
-        my = self.y + 70
-        for line in self.formatted_lines:
-            if line:
-                line_surf = self.body_font.render(line, True, (215, 225, 235))
-                surface.blit(line_surf, (self.x + 30, my))
-            my += 22
+        # Crisp pre-rendered plate
+        surface.blit(self.plate_surface, (self.x, self.y))
 
         # Buttons
         for b in self.ui_buttons:

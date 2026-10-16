@@ -83,6 +83,20 @@ class DeviceBase:
         if prv:
             self.current_page_key = prv
 
+    def reset_all_elements(self, algorithm: Optional[Algorithm] = None):
+        """Возвращает все органы управления (тумблеры, ручки, кнопки) в исходное положение."""
+        self.current_page_key = self.first_page_key
+        for el in self.elements:
+            el.cancel_dependencies()
+            el.is_hint_open = False
+            el.is_enabled = True
+            el._is_initializing = True
+            val = el.initial_value
+            if algorithm and el.name in algorithm.start_state_of_elements:
+                val = algorithm.start_state_of_elements[el.name]
+            el.set_value(val, trigger_dependencies=False)
+            el._is_initializing = False
+
     def apply_algorithm(self, algorithm: Algorithm):
         self.current_algorithm = algorithm
         self.current_page_key = self.first_page_key
@@ -92,18 +106,8 @@ class DeviceBase:
         self.hint_service.reset()
         self.hint_service.step_tracker = self.step_tracker
 
-        # Cancel any running delayed dependencies and reset element interaction states
-        for el in self.elements:
-            el.cancel_dependencies()
-            el.is_hint_open = False
-            el.is_enabled = True
-
-        # Set initial values
-        for el in self.elements:
-            el._is_initializing = True
-            val = algorithm.start_state_of_elements.get(el.name, 0)
-            el.set_value(val, trigger_dependencies=False)
-            el._is_initializing = False
+        # Полный сброс всех органов управления в исходное положение
+        self.reset_all_elements(algorithm)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         # Pass event to active page elements in reverse order (top z-order first)

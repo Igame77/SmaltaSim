@@ -23,6 +23,7 @@ class ElementBase:
         self.rect = pygame.Rect(pos_left, pos_top, width, height)
         
         self.value = value
+        self.initial_value = value
         self.dependency_actions = dependency_actions or []
         
         self.is_enabled = True
@@ -30,6 +31,14 @@ class ElementBase:
         self.hint_text = ""
         
         self.device = None  # Reference to parent Device
+        self._is_initializing = False
+
+    def reset_to_initial(self):
+        self.cancel_dependencies()
+        self.is_enabled = True
+        self.is_hint_open = False
+        self._is_initializing = True
+        self.set_value(self.initial_value, trigger_dependencies=False)
         self._is_initializing = False
 
     def set_value(self, new_value: int, trigger_dependencies: bool = True):

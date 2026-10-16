@@ -39,10 +39,11 @@ class TextInputField:
                 return True
         return False
 
-    def draw(self, surface: pygame.Surface):
-        # Отрисовка метки над полем
-        lbl_surf = self.label_font.render(self.label, True, (180, 200, 220))
-        surface.blit(lbl_surf, (self.rect.x, self.rect.y - 20))
+    def draw(self, surface: pygame.Surface, draw_label: bool = True):
+        # Отрисовка метки над полем (если не встроена в фоновую плашку)
+        if draw_label:
+            lbl_surf = self.label_font.render(self.label, True, (180, 200, 220))
+            surface.blit(lbl_surf, (self.rect.x, self.rect.y - 20))
 
         # Отрисовка поля ввода
         bg_col = (25, 33, 45) if not self.is_focused else (30, 42, 60)
@@ -148,6 +149,15 @@ class StudentAuthDialog:
 
         self.title_font = get_ui_font(20, bold=True)
         self.sub_font = get_ui_font(13)
+
+        from ui.plate_renderer import render_auth_dialog_plate
+        field_labels = [
+            (40, 66, "ФИО курсанта:"),
+            (40, 136, "Учебная группа / взвод:"),
+            (40 + (field_w - 20) // 2 + 20, 136, "Номер рабочего места (ПК):"),
+            (40, 206, "IP-адрес сервера преподавателя:")
+        ]
+        self.plate_surface = render_auth_dialog_plate(self.width, self.height, field_labels)
 
         # Фоновый поиск сервера
         self.start_auto_discovery()
@@ -290,31 +300,21 @@ class StudentAuthDialog:
         overlay.fill((0, 0, 0, 185))
         surface.blit(overlay, (0, 0))
 
-        # Карточка диалога
-        rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        pygame.draw.rect(surface, (18, 24, 35), rect, border_radius=14)
-        pygame.draw.rect(surface, (50, 70, 95), rect, width=2, border_radius=14)
-
-        # Заголовок
-        t_surf = self.title_font.render("Авторизация для сдачи экзамена", True, (255, 255, 255))
-        surface.blit(t_surf, (self.x + 40, self.y + 24))
-
-        sub_surf = self.sub_font.render("Данные будут переданы на пульт преподавателя и занесены в протокол", True, COLOR_TEXT_DIM)
-        surface.blit(sub_surf, (self.x + 40, self.y + 52))
+        # Тень и плашка карточки диалога
+        shadow_rect = pygame.Rect(self.x + 6, self.y + 6, self.width, self.height)
+        pygame.draw.rect(surface, (10, 15, 20), shadow_rect, border_radius=14)
+        surface.blit(self.plate_surface, (self.x, self.y))
 
         # Поля ввода
-        self.f_name.draw(surface)
-        self.f_group.draw(surface)
-        self.f_pc.draw(surface)
-        self.f_server_ip.draw(surface)
+        self.f_name.draw(surface, draw_label=False)
+        self.f_group.draw(surface, draw_label=False)
+        self.f_pc.draw(surface, draw_label=False)
+        self.f_server_ip.draw(surface, draw_label=False)
         self.btn_search.draw(surface)
 
         # Статус сети
         stat_surf = self.sub_font.render(self.status_msg, True, self.status_color)
         surface.blit(stat_surf, (self.x + 40, self.y + 275))
-
-        # Разделительная линия
-        pygame.draw.line(surface, (35, 45, 60), (self.x + 30, self.y + 375), (self.x + self.width - 30, self.y + 375), 1)
 
         # Кнопки
         self.btn_confirm.draw(surface)
@@ -356,8 +356,13 @@ class WaitingForTeacherDialog:
             bg_color=(75, 80, 90)
         )
 
-        self.title_font = get_ui_font(19, bold=True)
-        self.body_font = get_ui_font(14)
+        from ui.plate_renderer import render_waiting_dialog_plate
+        name = self.student_data.get("full_name", "")
+        group = self.student_data.get("group", "")
+        pc = self.student_data.get("pc_name", "")
+        self.plate_surface = render_waiting_dialog_plate(
+            self.width, self.height, name, group, pc, self.device_name, self.algo_name
+        )
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if self.btn_start.handle_event(event):
@@ -371,40 +376,14 @@ class WaitingForTeacherDialog:
         overlay.fill((0, 0, 0, 195))
         surface.blit(overlay, (0, 0))
 
-        rect = pygame.Rect(self.x, self.y, self.width, self.height)
-        pygame.draw.rect(surface, (18, 24, 35), rect, border_radius=14)
-        pygame.draw.rect(surface, (52, 211, 153), rect, width=2, border_radius=14)
+        shadow_rect = pygame.Rect(self.x + 6, self.y + 6, self.width, self.height)
+        pygame.draw.rect(surface, (10, 15, 20), shadow_rect, border_radius=14)
+        surface.blit(self.plate_surface, (self.x, self.y))
 
         # Анимированный пульсирующий индикатор
         pulse = (int(time.time() * 3) % 2 == 0)
         ind_col = (52, 211, 153) if pulse else (16, 185, 129)
         pygame.draw.circle(surface, ind_col, (self.x + 55, self.y + 42), 9)
-
-        t_surf = self.title_font.render("Ожидание допуска преподавателя...", True, (255, 255, 255))
-        surface.blit(t_surf, (self.x + 75, self.y + 30))
-
-        name = self.student_data.get("full_name", "")
-        group = self.student_data.get("group", "")
-        pc = self.student_data.get("pc_name", "")
-
-        lines = [
-            f"Курсант: {name} (Взвод/Группа {group}, {pc})",
-            f"Изделие: {self.device_name}",
-            f"Задание: {self.algo_name}",
-            "",
-            "Ваше рабочее место подключено к серверу преподавателя.",
-            "Экзамен начнется автоматически, как только преподаватель",
-            "нажмет «Допустить» или «Общий старт» на своем пульте."
-        ]
-
-        ly = self.y + 75
-        for line in lines:
-            if not line:
-                ly += 8
-                continue
-            surf = self.body_font.render(line, True, (220, 230, 240) if "Курсант:" in line or "Задание:" in line else COLOR_TEXT_DIM)
-            surface.blit(surf, (self.x + 40, ly))
-            ly += 22
 
         self.btn_start.draw(surface)
         self.btn_cancel.draw(surface)
