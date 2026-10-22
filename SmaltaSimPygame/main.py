@@ -3,6 +3,8 @@ import pygame
 from typing import Optional, List, Dict
 from enum import Enum, auto
 
+from pathlib import Path
+
 from config import (
     SCREEN_WIDTH, SCREEN_HEIGHT, CANVAS_WIDTH, CANVAS_HEIGHT, NAVBAR_HEIGHT,
     FPS, COLOR_BG, COLOR_NAVBAR, COLOR_NAVBAR_BORDER, COLOR_TEXT, COLOR_TEXT_DIM,
@@ -26,16 +28,32 @@ class SimulatorApp:
         pygame.init()
         pygame.font.init()
         pygame.display.set_caption("Vkm.ComplexSim - Комплексный симулятор устройств РЭБ")
-        
+
         # Display with hardware scaling and resizable/fullscreen support
         self.is_fullscreen = False
         flags = pygame.SCALED | pygame.RESIZABLE
         self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
         self.clock = pygame.time.Clock()
 
-        # Load Menu Background
-        self.menu_bg = pygame.image.load(str(Assets.BG_MAIN)).convert()
-        self.menu_bg = pygame.transform.smoothscale(self.menu_bg, (SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.menu_title_font = pygame.font.SysFont("segoeui", 36, bold=True)
+        self.menu_subtitle_font = pygame.font.SysFont("segoeui", 21)
+        self.menu_text_font = pygame.font.SysFont("segoeui", 19)
+
+        # Фон главного меню — затемнённый флаг
+        flag_path = Path(__file__).resolve().parent / "assets" / "flag_background.png"
+        self.menu_bg = pygame.image.load(str(flag_path)).convert()
+        self.menu_bg = pygame.transform.smoothscale(
+            self.menu_bg, (SCREEN_WIDTH, SCREEN_HEIGHT)
+        )
+
+        # Затемнение: 0 — чёрный, 255 — исходная яркость
+        dark_overlay = pygame.Surface(
+            (SCREEN_WIDTH, SCREEN_HEIGHT)
+        )
+        dark_overlay.fill((105, 112, 115))
+        self.menu_bg.blit(
+            dark_overlay, (0, 0), special_flags=pygame.BLEND_RGB_MULT
+        )
 
         # Fonts
         self.title_font = pygame.font.SysFont("Arial", 36, bold=True)
@@ -45,8 +63,15 @@ class SimulatorApp:
         self.header_font = pygame.font.SysFont("Arial", 14, bold=True)
 
         # TrollFace Easter egg
-        self.troll_face_img = pygame.image.load(str(Assets.TROLL_FACE)).convert_alpha()
-        self.troll_face_img = pygame.transform.smoothscale(self.troll_face_img, (120, 100))
+        try:
+            self.troll_face_img = pygame.image.load(
+                str(Assets.TROLL_FACE)
+            ).convert_alpha()
+            self.troll_face_img = pygame.transform.smoothscale(
+                self.troll_face_img, (120, 100)
+            )
+        except (pygame.error, OSError, AttributeError):
+            self.troll_face_img = None
         self.cheat_sequence = [pygame.K_z, pygame.K_d, pygame.K_c, pygame.K_t, pygame.K_c, pygame.K_l, pygame.K_f, pygame.K_v]
         self.entered_keys = []
         self.is_god_mode = False
@@ -71,13 +96,16 @@ class SimulatorApp:
 
         # UI Elements
         self._build_main_menu_buttons()
+
         self.btn_fullscreen = UIButton(
             pygame.Rect(SCREEN_WIDTH - 170, 18, 145, 34),
             "⛶ На весь экран",
             callback=self.toggle_fullscreen,
             font_size=13,
-            bg_color=(45, 60, 75)
+            bg_color=(36, 59, 75),
+            border_radius=6
         )
+
         self.btn_sim_fullscreen = UIButton(
             pygame.Rect(SCREEN_WIDTH - 60, 4, 46, 28),
             "⛶",
@@ -90,43 +118,6 @@ class SimulatorApp:
         self.is_fullscreen = not self.is_fullscreen
         pygame.display.toggle_fullscreen()
         self.btn_fullscreen.text = "🗗 В окно" if self.is_fullscreen else "⛶ На весь экран"
-
-    def _build_main_menu_buttons(self):
-        btn_w, btn_h = 240, 52
-        start_x = 100
-        start_y = 280
-        gap = 22
-
-        self.menu_buttons = [
-            UIButton(
-                pygame.Rect(start_x, start_y, btn_w, btn_h),
-                "Обучение",
-                callback=lambda: self._open_device_selection(ApplicationMode.TRAINING),
-                font_size=18,
-                bg_color=(35, 110, 160)
-            ),
-            UIButton(
-                pygame.Rect(start_x, start_y + (btn_h + gap), btn_w, btn_h),
-                "Экзамен",
-                callback=lambda: self._open_device_selection(ApplicationMode.EXAMINE),
-                font_size=18,
-                bg_color=(170, 95, 30)
-            ),
-            UIButton(
-                pygame.Rect(start_x, start_y + 2 * (btn_h + gap), btn_w, btn_h),
-                "Информация",
-                callback=self._show_info_dialog,
-                font_size=17,
-                bg_color=(50, 65, 80)
-            ),
-            UIButton(
-                pygame.Rect(start_x, start_y + 3 * (btn_h + gap), btn_w, btn_h),
-                "Выход",
-                callback=self.quit,
-                font_size=17,
-                bg_color=(120, 45, 45)
-            )
-        ]
 
     def _show_info_dialog(self):
         msg = (
@@ -142,9 +133,9 @@ class SimulatorApp:
         self.active_dialog = ModalDialog(
             "О программе",
             msg,
-            [("Закрыть", lambda: setattr(self, 'active_dialog', None), (60, 75, 90))],
-            width=700,
-            height=380,
+            [("Закрыть", lambda: setattr(self, 'active_dialog', None), (36, 59, 75))],
+            width=720,
+            height=410,
             layout="row"
         )
 
@@ -362,7 +353,7 @@ class SimulatorApp:
 
                     # Cheat key listener
                     self._check_cheat_code(event.key)
-                    
+
                     # Space advances INFO step in training
                     if event.key == pygame.K_SPACE and self.active_device and self.active_device.hint_service:
                         curr_action = self.active_device.hint_service.get_current_action()
@@ -429,6 +420,84 @@ class SimulatorApp:
             self.draw()
             pygame.display.flip()
 
+    def draw_main_menu(self):
+        # Статичный затемнённый флаг
+        self.screen.blit(self.menu_bg, (0, 0))
+
+        # Мягкая тёмная подложка слева под описание
+        left_panel = pygame.Surface((490, 610), pygame.SRCALPHA)
+        pygame.draw.rect(
+            left_panel,
+            (10, 19, 28, 205),
+            left_panel.get_rect(),
+            border_radius=18
+        )
+        pygame.draw.rect(
+            left_panel,
+            (112, 151, 174, 90),
+            left_panel.get_rect(),
+            width=1,
+            border_radius=18
+        )
+        self.screen.blit(left_panel, (65, 55))
+
+        # Затемняющая подложка под карточками симуляторов
+        cards_panel = pygame.Surface((825, 245), pygame.SRCALPHA)
+        pygame.draw.rect(
+            cards_panel,
+            (17, 24, 25, 95),
+            cards_panel.get_rect(),
+            border_radius=20
+        )
+        self.screen.blit(cards_panel, (625, 215))
+
+        title_font = self.menu_title_font
+        subtitle_font = self.menu_subtitle_font
+        text_font = self.menu_text_font
+
+        # Заголовок на русском
+        title = title_font.render(
+            "Комплексный симулятор",
+            True,
+            COLOR_TEXT
+        )
+        subtitle = subtitle_font.render(
+            "устройств РЭБ и РЛС",
+            True,
+            (210, 224, 234)
+        )
+
+        self.screen.blit(title, (85, 75))
+        self.screen.blit(subtitle, (88, 125))
+
+        # Описание слева
+        description = [
+            "Программа предназначена для обучения",
+            "и проверки знаний курсантов по приборам",
+            "и комплексам радиоэлектронной борьбы",
+            "и радиолокации.",
+            "",
+            "Доступные симуляторы:",
+            "• Станция активных помех ЛО01 «Смальта»",
+            "• Импульсная РЛС ОНЦ",
+            "",
+            "Выберите симулятор справа,",
+            "чтобы начать работу."
+        ]
+
+        y = 205
+        for line in description:
+            if line:
+                text_surface = text_font.render(
+                    line, True, (225, 234, 240)
+                )
+                self.screen.blit(text_surface, (90, y))
+            y += 31
+
+        # Кнопки симуляторов и нижние кнопки
+        for button in self.menu_buttons:
+            button.draw(self.screen)
+
     def draw(self):
         if self.state == AppState.MAIN_MENU:
             self.draw_main_menu()
@@ -439,30 +508,42 @@ class SimulatorApp:
         if self.active_dialog:
             self.active_dialog.draw(self.screen)
 
-    def draw_main_menu(self):
-        self.screen.blit(self.menu_bg, (0, 0))
+    def _build_main_menu_buttons(self):
+        self._selected_menu_device = None
 
-        # Title Card with dark translucent plate
-        card = pygame.Surface((700, 150), pygame.SRCALPHA)
-        card.fill((15, 20, 25, 210))
-        pygame.draw.rect(card, (0, 180, 220), (0, 0, 700, 150), width=2, border_radius=8)
+        # Все кнопки в единой спокойной палитре
+        button_color = (30, 48, 63)
 
-        t1 = self.title_font.render("Vkm.ComplexSim", True, (255, 255, 255))
-        t2 = self.subtitle_font.render("Комплексный симулятор устройств РЭБ и радиолокации", True, (0, 210, 255))
-        t3 = self.subtitle_font.render("Учебный тренажер по изделиям ЛО01 'Смальта' и РЛС ОНЦ", True, COLOR_TEXT_DIM)
-
-        card.blit(t1, (25, 20))
-        card.blit(t2, (25, 68))
-        card.blit(t3, (25, 100))
-
-        self.screen.blit(card, (100, 80))
-
-        # Buttons
-        for b in self.menu_buttons:
-            b.draw(self.screen)
-
-        # Fullscreen button in menu
-        self.btn_fullscreen.draw(self.screen)
+        self.menu_buttons = [
+            UIButton(
+                pygame.Rect(635, 245, 390, 185),
+                "ЛО01 «Смальта»",
+                callback=lambda: self._open_mode_selection("smalta"),
+                font_size=23,
+                bg_color=button_color
+            ),
+            UIButton(
+                pygame.Rect(1050, 245, 390, 185),
+                "РЛС ОНЦ",
+                callback=lambda: self._open_mode_selection("rls"),
+                font_size=23,
+                bg_color=button_color
+            ),
+            UIButton(
+                pygame.Rect(110, 695, 195, 46),
+                "О программе",
+                callback=self._show_info_dialog,
+                font_size=16,
+                bg_color=(30, 48, 63)
+            ),
+            UIButton(
+                pygame.Rect(315, 695, 150, 46),
+                "Выход",
+                callback=self.quit,
+                font_size=16,
+                bg_color=(30, 48, 63)
+            )
+        ]
 
     def draw_simulation(self):
         # 1. Draw active device canvas (0..800)
@@ -518,7 +599,10 @@ class SimulatorApp:
             self.screen.blit(pg_surf, (px, py))
 
         # 5. TrollFace easter egg popup
-        if pygame.time.get_ticks() < self.show_troll_until_ms:
+        if (
+            self.troll_face_img is not None
+            and pygame.time.get_ticks() < self.show_troll_until_ms
+        ):
             tx = (SCREEN_WIDTH - 120) // 2
             ty = CANVAS_HEIGHT - 130
             self.screen.blit(self.troll_face_img, (tx, ty))

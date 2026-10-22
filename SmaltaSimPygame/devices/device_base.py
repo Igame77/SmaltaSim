@@ -30,26 +30,41 @@ class DeviceBase:
     def get_elements_for_page(self, page_key: Any) -> List[ElementBase]:
         return [el for el in self.elements if el.page_key == page_key]
 
+
+
     def set_background(self, page_key: Any, image_path: str):
         raw = pygame.image.load(str(image_path))
+
         if pygame.display.get_surface() is not None:
             raw = raw.convert()
-        
-        # Proportional uniform scaling (WPF Stretch="Uniform") to fit CANVAS_WIDTH x CANVAS_HEIGHT
-        orig_w, orig_h = raw.get_size()
-        scale = min(CANVAS_WIDTH / orig_w, CANVAS_HEIGHT / orig_h)
-        scaled_w = int(round(orig_w * scale))
-        scaled_h = int(round(orig_h * scale))
-        scaled_img = pygame.transform.smoothscale(raw, (scaled_w, scaled_h))
 
-        # Center on 1600x800 canvas with dark station chassis background
-        canvas_bg = pygame.Surface((CANVAS_WIDTH, CANVAS_HEIGHT))
-        canvas_bg.fill((20, 24, 28))
-        offset_x = (CANVAS_WIDTH - scaled_w) // 2
-        offset_y = (CANVAS_HEIGHT - scaled_h) // 2
+        # Сохраняем пропорции изображения, не растягивая приборную панель.
+        canvas_bg = pygame.Surface(
+            (CANVAS_WIDTH, CANVAS_HEIGHT),
+            pygame.SRCALPHA
+        )
+        canvas_bg.fill((18, 24, 29))
+
+        scale = min(
+            CANVAS_WIDTH / raw.get_width(),
+            CANVAS_HEIGHT / raw.get_height()
+        )
+
+        new_width = int(raw.get_width() * scale)
+        new_height = int(raw.get_height() * scale)
+
+        scaled_img = pygame.transform.smoothscale(
+            raw, (new_width, new_height)
+        )
+
+        offset_x = (CANVAS_WIDTH - new_width) // 2
+        offset_y = (CANVAS_HEIGHT - new_height) // 2
+
         canvas_bg.blit(scaled_img, (offset_x, offset_y))
-        
+
         self.page_backgrounds[page_key] = canvas_bg
+
+
 
     def can_go_forward(self) -> bool:
         idx = self.pages.index(self.current_page_key)
