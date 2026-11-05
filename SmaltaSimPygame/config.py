@@ -57,6 +57,7 @@ COLOR_DARK_GREEN = (20, 80, 20)
 class ApplicationMode(Enum):
     TRAINING = "Обучение"
     EXAMINE = "Экзамен"
+    TESTING = "Тестирование"
 
 # Asset Paths
 class Assets:
@@ -73,6 +74,28 @@ class Assets:
     RLS_G5_15 = ASSETS_DIR / "RlsOnc" / "Backgrounds" / "rls_onc_g5_15.jpg"
     RLS_RADAR = ASSETS_DIR / "RlsOnc" / "Backgrounds" / "rls_onc_radar.jpg"
     RLS_C1_65 = ASSETS_DIR / "RlsOnc" / "Backgrounds" / "rls_onc_c1_65.jpg"
+
+    # Sorbtia backgrounds
+    SORBTIA_KPA = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "kpa_bg.png"
+    SORBTIA_PN_OMEGA = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "pn_omega_bg.png"
+    SORBTIA_PN_PV = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "pn_pv_bg.png"
+    SORBTIA_UBP = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "ubp_bg.png"
+    SORBTIA_G5_54 = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "g5_54_bg.png"
+    SORBTIA_G4_82 = ASSETS_DIR / "Sorbtia" / "Backgrounds" / "g4_82_bg.png"
+
+    # Fasol backgrounds
+    FASOL_PU = ASSETS_DIR / "Fasol" / "Backgrounds" / "fasol_pu.png"
+    FASOL_B2 = ASSETS_DIR / "Fasol" / "Backgrounds" / "fasol_b2.png"
+    FASOL_C4_60 = ASSETS_DIR / "Fasol" / "Backgrounds" / "fasol_c4_60.png"
+    FASOL_M3_1A = ASSETS_DIR / "Fasol" / "Backgrounds" / "fasol_m3_1a.png"
+
+    # Bereza backgrounds
+    BEREZA_INDICATOR = ASSETS_DIR / "Bereza" / "Backgrounds" / "bereza_indicator.png"
+    BEREZA_CONTROL = ASSETS_DIR / "Bereza" / "Backgrounds" / "bereza_control.png"
+
+    # Azalia backgrounds
+    AZALIA_CONTROL = ASSETS_DIR / "Azalia" / "Backgrounds" / "azalia_control.png"
+    AZALIA_TX = ASSETS_DIR / "Azalia" / "Backgrounds" / "azalia_tx.png"
     
     # Controls
     THUMBLER_ON = ASSETS_DIR / "ThumblerOn.png"

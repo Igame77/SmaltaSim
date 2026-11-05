@@ -16,6 +16,10 @@ from core.algorithm_service import ActionName
 from devices.device_base import DeviceBase
 from devices.smalta import create_smalta_device, get_smalta_algorithms
 from devices.rls_onc import create_rls_device, get_rls_algorithms
+from devices.sorbtia import create_sorbtia_device, get_sorbtia_algorithms
+from devices.fasol import create_fasol_device, get_fasol_algorithms
+from devices.bereza import create_bereza_device, get_bereza_algorithms
+from devices.azalia import create_azalia_device, get_azalia_algorithms
 from ui.ui_widgets import UIButton, ModalDialog, MenuCardButton
 from ui.hint_renderer import HintRenderer
 from ui.student_auth_dialog import StudentAuthDialog, WaitingForTeacherDialog
@@ -23,10 +27,13 @@ from network.student_client import StudentClient
 from network.action_annotator import ActionAnnotator
 from network.exam_protocol import EventType, StudentStatus
 from core.vsp_manager import VspManager
+from core.quiz_engine import QuizBank, QuizSession, QuizResult
+from ui.quiz_renderer import QuizRenderer
 
 class AppState(Enum):
     MAIN_MENU = auto()
     SIMULATION = auto()
+    QUIZ = auto()
 
 class SimulatorApp:
     def __init__(self):
@@ -108,12 +115,23 @@ class SimulatorApp:
         self.devices_catalog: Dict[str, DeviceBase] = {
             "smalta": create_smalta_device(),
             "rls": create_rls_device(),
+            "sorbtia": create_sorbtia_device(),
+            "fasol": create_fasol_device(),
+            "bereza": create_bereza_device(),
+            "azalia": create_azalia_device(),
         }
         self.algorithms_catalog = {
             "smalta": get_smalta_algorithms(),
             "rls": get_rls_algorithms(),
+            "sorbtia": get_sorbtia_algorithms(),
+            "fasol": get_fasol_algorithms(),
+            "bereza": get_bereza_algorithms(),
+            "azalia": get_azalia_algorithms(),
         }
         self.vsp_manager = VspManager()
+
+        # Quiz / Testing system
+        self.quiz_renderer: Optional[QuizRenderer] = None
 
         # UI Elements
         self._build_main_menu_buttons()
@@ -229,21 +247,17 @@ class SimulatorApp:
     def _open_device_selection(self, mode: ApplicationMode):
         self.mode = mode
 
-        def choose_builtin(dev_key: str):
+        def choose_device(dev_key: str):
             self.active_dialog = None
             self._open_algorithm_selection(dev_key)
 
-        def choose_external(sim_id: str):
-            self.active_dialog = None
-            self._show_external_sim_dialog(sim_id, mode)
-
         buttons = [
-            ("ЛО01 «Смальта» (Встроенный)", lambda: choose_builtin("smalta"), (14, 165, 233)),
-            ("РЛС ОНЦ (Встроенный)", lambda: choose_builtin("rls"), (56, 189, 248)),
-            ("СПС-5М «Фасоль» (ВСП.02)", lambda: choose_external("fasol"), (234, 88, 12)),
-            ("«Сорбция-С» МРМ-70 (ВСП.02/03)", lambda: choose_external("sorbtia"), (16, 185, 129)),
-            ("Станция «Азалия» (ВСП.03)", lambda: choose_external("azalia"), (168, 85, 247)),
-            ("СПО-15 «Береза» (ВСП.01/03)", lambda: choose_external("bereza"), (236, 72, 153)),
+            ("ЛО01 «Смальта» (Встроенный)", lambda: choose_device("smalta"), (14, 165, 233)),
+            ("РЛС ОНЦ (Встроенный)", lambda: choose_device("rls"), (56, 189, 248)),
+            ("«Сорбция-С» МРМ-70 (Встроенный)", lambda: choose_device("sorbtia"), (16, 185, 129)),
+            ("СПС-5М «Фасоль» (Встроенный)", lambda: choose_device("fasol"), (234, 88, 12)),
+            ("СПО-15 «Береза» (Встроенный)", lambda: choose_device("bereza"), (236, 72, 153)),
+            ("Станция «Азалия» (Встроенный)", lambda: choose_device("azalia"), (168, 85, 247)),
             ("Отмена", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)),
         ]
         self.active_dialog = ModalDialog(
@@ -251,7 +265,7 @@ class SimulatorApp:
             "Выберите станцию радиоэлектронной борьбы или радиолокации для работы:",
             buttons,
             width=880,
-            height=320,
+            height=340,
             layout="grid"
         )
 
@@ -293,31 +307,107 @@ class SimulatorApp:
         )
 
     def _open_test_selection(self):
+        def open_native_tests():
+            self.active_dialog = None
+            self._open_native_quiz_selection()
+
         def open_category(cat_key: str):
             self.active_dialog = None
             self._open_category_tests(cat_key)
 
         buttons = [
-            ("ВСП.01: Радиотехническая разведка и контроль (7 тестов)", lambda: open_category("vsp01"), (14, 165, 233)),
-            ("ВСП.02: Станции помех и радиоэлектронное подавление (11 тестов)", lambda: open_category("vsp02"), (245, 158, 11)),
-            ("ВСП.03: Регламентные работы и подготовка к полетам (9 тестов)", lambda: open_category("vsp03"), (16, 185, 129)),
+            ("★ Встроенное интерактивное тестирование (ВСП.01, 02, 03)", open_native_tests, (16, 185, 129)),
+            ("ВСП.01: Радиотехническая разведка (Внешние тесты)", lambda: open_category("vsp01"), (14, 165, 233)),
+            ("ВСП.02: Станции помех и РЭБ (Внешние тесты)", lambda: open_category("vsp02"), (245, 158, 11)),
+            ("ВСП.03: Регламентные работы (Внешние тесты)", lambda: open_category("vsp03"), (168, 85, 247)),
             ("Закрыть", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)),
         ]
 
         msg = (
-            "Единая база интерактивных тестов по учебным дисциплинам ВСП.01, ВСП.02 и ВСП.03.\n"
-            "Всего доступно 27 специализированных тестов по станциям, приборам и регламентам.\n"
-            "Выберите интересующую дисциплину для перехода к списку доступных тестов:"
+            "Единая база контроля знаний по учебным дисциплинам ВСП.01, ВСП.02 и ВСП.03.\n\n"
+            "Доступны:\n"
+            "  • Встроенное тестирование: интерактивная сдача с выставлением оценки (2, 3, 4, 5),\n"
+            "    подробным разбором ответов и сетевой передачей на пульт преподавателя.\n"
+            "  • База из 27 специализированных тестов по всем станциям и практическим занятиям.\n\n"
+            "Выберите формат прохождения тестирования:"
         )
 
         self.active_dialog = ModalDialog(
-            "Тесты знаний и практических нормативов",
+            "Тесты знаний и нормативов РЭБ",
             msg,
             buttons,
-            width=820,
-            height=370,
+            width=880,
+            height=420,
             layout="list"
         )
+
+    def _open_native_quiz_selection(self):
+        all_tests = QuizBank.get_all_tests()
+        buttons = []
+
+        colors = [
+            (14, 165, 233), (56, 189, 248),
+            (245, 158, 11), (234, 88, 12), (16, 185, 129),
+            (168, 85, 247), (236, 72, 153), (34, 197, 94)
+        ]
+
+        for idx, (t_id, t_data) in enumerate(all_tests.items()):
+            btn_title = f"{t_data['badge']}: {t_data['title'].split(': ')[-1]}"
+            c = colors[idx % len(colors)]
+            def make_start(tid=t_id):
+                def cb():
+                    self.active_dialog = None
+                    self._start_native_quiz(tid)
+                return cb
+            buttons.append((btn_title, make_start(), c))
+
+        buttons.append(("← Назад к выбору режима", self._open_test_selection, (75, 80, 85)))
+
+        self.active_dialog = ModalDialog(
+            "Встроенные интерактивные тесты",
+            "Выберите тестовый норматив для сдачи (оценка и аудит фиксируются в сети):",
+            buttons,
+            width=920,
+            height=430,
+            layout="grid"
+        )
+
+    def _start_native_quiz(self, test_id: str):
+        self.active_dialog = None
+        session = QuizSession(test_id, self.student_data)
+        self.quiz_renderer = QuizRenderer(
+            session,
+            on_finish=self._on_quiz_finished,
+            on_exit=self._exit_quiz
+        )
+        self.state = AppState.QUIZ
+
+        if self.student_client and self.student_client.is_connected:
+            self.student_client.send_event(EventType.EXAM_START, {
+                "test_id": test_id,
+                "title": session.test_title,
+                "student": self.student_data
+            })
+
+    def _on_quiz_finished(self, result: QuizResult):
+        if self.student_client and self.student_client.is_connected:
+            self.student_client.send_event(EventType.EXAM_FINISH, {
+                "test_id": result.test_id,
+                "title": result.test_title,
+                "score": result.score_percent,
+                "grade": result.grade,
+                "grade_text": result.grade_text,
+                "time_spent": result.time_spent_seconds,
+                "correct": result.correct_answers,
+                "total": result.total_questions,
+                "student": self.student_data
+            })
+            if self.quiz_renderer:
+                self.quiz_renderer.set_network_status("Результат успешно передан на пульт преподавателя")
+
+    def _exit_quiz(self):
+        self.state = AppState.MAIN_MENU
+        self.quiz_renderer = None
 
     def _open_category_tests(self, cat_key: str):
         cat_data = self.vsp_manager.tests_by_discipline.get(cat_key)
@@ -365,6 +455,14 @@ class SimulatorApp:
             self.devices_catalog["smalta"] = create_smalta_device()
         elif dev_key == "rls":
             self.devices_catalog["rls"] = create_rls_device()
+        elif dev_key == "sorbtia":
+            self.devices_catalog["sorbtia"] = create_sorbtia_device()
+        elif dev_key == "fasol":
+            self.devices_catalog["fasol"] = create_fasol_device()
+        elif dev_key == "bereza":
+            self.devices_catalog["bereza"] = create_bereza_device()
+        elif dev_key == "azalia":
+            self.devices_catalog["azalia"] = create_azalia_device()
 
         device = self.devices_catalog[dev_key]
         algos = self.algorithms_catalog[dev_key]
@@ -841,6 +939,11 @@ class SimulatorApp:
                     if self.active_device:
                         self.active_device.handle_event(event)
 
+                # Quiz / Knowledge testing events
+                elif self.state == AppState.QUIZ:
+                    if self.quiz_renderer:
+                        self.quiz_renderer.handle_event(event)
+
             # Update
             if self.state == AppState.SIMULATION and self.active_device:
                 self.active_device.update(dt_ms)
@@ -903,6 +1006,8 @@ class SimulatorApp:
             self.draw_main_menu()
         elif self.state == AppState.SIMULATION:
             self.draw_simulation()
+        elif self.state == AppState.QUIZ and self.quiz_renderer:
+            self.quiz_renderer.draw(self.screen)
 
         # Modal dialog on top
         if self.active_dialog:
@@ -926,13 +1031,13 @@ class SimulatorApp:
 
             t_main = self.title_font.render("VKM.COMPLEXSIM", True, (248, 250, 252))
             t_sub = self.subtitle_font.render("Комплексный учебно-тренировочный симулятор устройств РЭБ и радиолокации", True, (56, 189, 248))
-            t_desc = self.header_desc_font.render("Отработка практических регламентов по станциям ЛО01 «Смальта» и РЛС ОНЦ", True, (148, 163, 184))
+            t_desc = self.header_desc_font.render("Отработка практических регламентов и тестов по станциям РЭБ и радиолокации", True, (148, 163, 184))
 
             header_surf.blit(t_main, (35, 20))
             header_surf.blit(t_sub, (35, 66))
             header_surf.blit(t_desc, (35, 96))
 
-            badges = [("[ v2.2.0 ]", (148, 163, 184)), ("[ СЕТЕВОЙ МОНИТОРИНГ ]", (148, 163, 184)), ("[ ГОТОВ ]", (52, 211, 153))]
+            badges = [("[ v2.3.0 ]", (148, 163, 184)), ("[ СЕТЕВОЙ МОНИТОРИНГ ]", (148, 163, 184)), ("[ ГОТОВ ]", (52, 211, 153))]
             bx = header_w - 35
             for badge_text, badge_col in badges:
                 b_surf = self.badge_font.render(badge_text, True, badge_col)

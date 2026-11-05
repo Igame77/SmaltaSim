@@ -105,7 +105,7 @@ def build_exe():
         shutil.copy2(teacher_exe, target_teacher_exe)
         print(f"Сервер преподавателя скопирован в: {target_teacher_exe} ({target_teacher_exe.stat().st_size / (1024*1024):.2f} МБ)")
 
-def package_zip(version="v2.2.0"):
+def package_zip(version="v2.3.0"):
     print("--- 4. Создание релизного ZIP-архива для GitHub ---")
     out_folder = DIST_DIR / "SmaltaSim"
     if not out_folder.exists():
@@ -135,5 +135,5 @@ def package_zip(version="v2.2.0"):
 if __name__ == "__main__":
     clean()
     build_exe()
-    package_zip("v2.2.0")
+    package_zip("v2.3.0")
     print("--- Сборка успешно завершена! ---")
