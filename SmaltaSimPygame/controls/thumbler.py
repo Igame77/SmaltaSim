@@ -18,7 +18,8 @@ class Thumbler(ElementBase):
         startup_rotation: int = 0,
         dependency_actions: Optional[List[DependencyAction]] = None
     ):
-        # 77x133 scaled at 96/300 DPI ~ 25x43
+        # The supplied 77x133 lever sprites are scaled to 25x43 logical pixels.
+        # Unlike the old horizontal channel-selector sprite, these are upright.
         base_w, base_h = 25, 43
         super().__init__(
             name=name,
@@ -37,10 +38,13 @@ class Thumbler(ElementBase):
     @classmethod
     def _load_images(cls):
         if cls._img_on is None:
+            # Use the supplied lever PNGs. Keep per-pixel alpha on controls;
+            # exactly one of the two state images is drawn for each switch.
             raw_on = pygame.image.load(str(Assets.THUMBLER_ON))
             if pygame.display.get_surface() is not None:
                 raw_on = raw_on.convert_alpha()
             cls._img_on = pygame.transform.smoothscale(raw_on, (25, 43))
+
             raw_off = pygame.image.load(str(Assets.THUMBLER_OFF))
             if pygame.display.get_surface() is not None:
                 raw_off = raw_off.convert_alpha()
@@ -76,5 +80,7 @@ class Thumbler(ElementBase):
         return False
 
     def draw(self, surface: pygame.Surface):
+        # Draw only the currently selected lever state. Thumbler is a true
+        # two-position toggle: value persists until the next click.
         surf = self.rendered_on if self.value == 1 else self.rendered_off
         surface.blit(surf, (self.pos_left, self.pos_top))

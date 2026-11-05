@@ -47,31 +47,8 @@ class GaugeArrow(ElementBase):
             self.current_rotation = float(self.target_rotation)
 
     def draw(self, surface: pygame.Surface):
-        # The pivot is at (pos_left + 60, pos_top + 2) or relative pivot (60, 2)
-        # Arrow base width is 4, length 60
-        pivot_x = self.pos_left + 60
-        pivot_y = self.pos_top + 2
+        # Needles are already part of the supplied instrument artwork. Keep this
+        # element and its values for algorithm dependencies, but hide the extra
+        # black software needle that was being drawn over the photographed one.
+        return
 
-        angle_rad = math.radians(self.current_rotation)
-        
-        # Local points relative to pivot (0, 0):
-        # Tip was at (-60, 0), corners at (0, -2) and (0, +2)
-        local_points = [
-            (-60, 0),
-            (0, -2.5),
-            (0, 2.5)
-        ]
-        
-        # Rotate points around pivot
-        cos_a = math.cos(angle_rad)
-        sin_a = math.sin(angle_rad)
-        
-        screen_points = []
-        for lx, ly in local_points:
-            rx = lx * cos_a - ly * sin_a
-            ry = lx * sin_a + ly * cos_a
-            screen_points.append((pivot_x + rx, pivot_y + ry))
-
-        pygame.draw.polygon(surface, (15, 15, 15), screen_points)
-        # Draw pivot pin
-        pygame.draw.circle(surface, (40, 40, 40), (int(pivot_x), int(pivot_y)), 3)

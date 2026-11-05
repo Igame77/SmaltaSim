@@ -1,0 +1,174 @@
+import pygame
+from typing import Optional, List, Any
+from core.element_base import ElementBase
+from core.dependency_action import DependencyAction
+from config import Assets
+from controls.icon_animation import (
+    load_icon, fit_inside, normalize_pair, blend_surfaces,
+    progress_since, ease, press_effect,
+)
+
+
+class BigButton(ElementBase):
+    """Animated push-button / special control for the Smalta panels."""
+    _fallback_on: Optional[pygame.Surface] = None
+    _fallback_off: Optional[pygame.Surface] = None
+
+    ANIMATION_MS = 160
+    BUTTON_SIZE = (56, 56)
+
+    def __init__(
+        self,
+        name: str,
+        pos_top: int,
+        pos_left: int,
+        page_key: Any,
+        value: int = 0,
+        dependency_actions: Optional[List[DependencyAction]] = None,
+        dependency_secure_element_name: Optional[str] = None
+    ):
+        super().__init__(
+            name=name,
+            pos_top=pos_top,
+            pos_left=pos_left,
+            page_key=page_key,
+            value=value,
+            width=self.BUTTON_SIZE[0],
+            height=self.BUTTON_SIZE[1],
+            dependency_actions=dependency_actions
+        )
+        self.dependency_secure_element_name = dependency_secure_element_name
+        self.is_dependency_actions_running = False
+        self._is_pressed = False
+        self.art_style = "ivory" if name in {
+            "lo01p_button_control", "lo01p_button_eject"
+        } else "push_button"
+
+        self._state_surfaces = self._build_state_surfaces()
+        self.width, self.height = self._state_surfaces[0].get_size()
+        center_x = self.pos_left + self.BUTTON_SIZE[0] / 2
+        center_y = self.pos_top + self.BUTTON_SIZE[1] / 2
+        self.draw_left = round(center_x - self.width / 2)
+        self.draw_top = round(center_y - self.height / 2)
+        self.rect = pygame.Rect(self.draw_left, self.draw_top, self.width, self.height)
+        self._display_value = int(self.value)
+        self._transition_from: Optional[pygame.Surface] = None
+        self._animation_start_ms = 0
+
+    def _build_state_surfaces(self) -> dict[int, pygame.Surface]:
+        if self.art_style == "push_button":
+            off_img = load_icon("button_off.png", Assets.BIG_BUTTON_OFF)
+            on_img = load_icon("button_on.png", Assets.BIG_BUTTON_ON)
+            if off_img is not None and on_img is not None:
+                off_img = fit_inside(off_img, self.BUTTON_SIZE)
+                on_img = fit_inside(on_img, self.BUTTON_SIZE)
+                off_img, on_img = normalize_pair(off_img, on_img, "center")
+                return {0: off_img, 1: on_img}
+
+            if BigButton._fallback_on is None or BigButton._fallback_off is None:
+                raw_on = load_icon("__unused_button_on.png", Assets.BIG_BUTTON_ON)
+                raw_off = load_icon("__unused_button_off.png", Assets.BIG_BUTTON_OFF)
+                if raw_on is None or raw_off is None:
+                    raise FileNotFoundError(
+                        "Button sprites not found. Copy button_on.png and button_off.png "
+                        "to assets/Smalta/Controls/."
+                    )
+                BigButton._fallback_on = pygame.transform.smoothscale(raw_on, self.BUTTON_SIZE)
+                BigButton._fallback_off = pygame.transform.smoothscale(raw_off, self.BUTTON_SIZE)
+            off_img, on_img = normalize_pair(
+                BigButton._fallback_off, BigButton._fallback_on, "center"
+            )
+            return {0: off_img, 1: on_img}
+
+        # CONTROL and EJECT are rotary/lever-like ivory controls on the panel,
+        # not red pushbuttons. They swing a little between their two positions.
+        ivory = load_icon("lever_ivory.png", Assets.THUMBLER_OFF)
+        if ivory is None:
+            ivory = load_icon("__unused_ivory.png", Assets.BIG_BUTTON_OFF)
+        if ivory is not None:
+            ivory = fit_inside(ivory, (52, 52))
+            off_img = pygame.transform.rotate(ivory, -11)
+            on_img = pygame.transform.rotate(ivory, 11)
+            off_img, on_img = normalize_pair(off_img, on_img, "center")
+            return {0: off_img, 1: on_img}
+
+        # Last-resort fallback: keep prior button rendering if custom assets are absent.
+        raw_on = load_icon("__unused_button_on.png", Assets.BIG_BUTTON_ON)
+        raw_off = load_icon("__unused_button_off.png", Assets.BIG_BUTTON_OFF)
+        if raw_on is None or raw_off is None:
+            raise FileNotFoundError("No BigButton sprites are available.")
+        off_img = pygame.transform.smoothscale(raw_off, self.BUTTON_SIZE)
+        on_img = pygame.transform.smoothscale(raw_on, self.BUTTON_SIZE)
+        off_img, on_img = normalize_pair(off_img, on_img, "center")
+        return {0: off_img, 1: on_img}
+
+    def _current_frame(self) -> pygame.Surface:
+        target = self._state_surfaces[int(self._display_value)]
+        if self._transition_from is None:
+            return target.copy()
+        raw = progress_since(self._animation_start_ms, self.ANIMATION_MS)
+        if raw >= 1.0:
+            return target.copy()
+        return blend_surfaces(self._transition_from, target, raw)
+
+    def on_value_changed(self):
+        if hasattr(self, "_state_surfaces") and hasattr(self, "_display_value"):
+            self._transition_from = self._current_frame()
+            self._display_value = int(self.value)
+            self._animation_start_ms = pygame.time.get_ticks()
+        super().on_value_changed()
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if not self.is_enabled:
+            return False
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                self._is_pressed = True
+                self.interact()
+                return True
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            if self._is_pressed:
+                self._is_pressed = False
+                return True
+        return False
+
+    def interact(self):
+        # Keep the existing secure-element lock behaviour.
+        if self.dependency_secure_element_name and self.device:
+            sec_el = self.device.get_element_by_name(self.dependency_secure_element_name)
+            if sec_el and getattr(sec_el, "is_dependency_actions_running", False):
+                return
+
+        self.set_value(1)
+        if self.device and self.device.history_service:
+            self.device.history_service.record_click(self.name)
+        if self.device and self.device.hint_service:
+            self.device.hint_service.on_element_interacted(self.name, 1)
+
+    def notify_dependencies(self):
+        if not self.device:
+            return
+        self.is_dependency_actions_running = True
+        completed_count = 0
+        total_actions = len(self.dependency_actions)
+
+        if total_actions == 0:
+            self.is_dependency_actions_running = False
+            return
+
+        def on_action_done(target_name: str):
+            nonlocal completed_count
+            completed_count += 1
+            if self.device and self.device.history_service:
+                self.device.history_service.record_idle(target_name)
+            if completed_count >= total_actions:
+                self.is_dependency_actions_running = False
+
+        for dep in self.dependency_actions:
+            dep.execute(self.value, self.device.get_element_by_name, callback=on_action_done)
+
+    def draw(self, surface: pygame.Surface):
+        frame = self._current_frame()
+        frame, press_offset = press_effect(frame, self._is_pressed)
+        surface.blit(frame, (self.draw_left + press_offset[0], self.draw_top + press_offset[1]))

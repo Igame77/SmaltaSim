@@ -1,0 +1,196 @@
+import pygame
+from typing import Optional, List, Any
+from core.element_base import ElementBase
+from core.dependency_action import DependencyAction
+from config import Assets
+from controls.icon_animation import (
+    load_icon, normalize_pair, blend_surfaces, progress_since,
+)
+
+
+class Thumbler(ElementBase):
+    """Smalta switch with image-based positions and animated transitions.
+
+    Art style is selected from the element name so existing smalta.py calls
+    remain compatible.  All original click/history/hint/dependency behaviour
+    is preserved.
+    """
+    _fallback_on: Optional[pygame.Surface] = None
+    _fallback_off: Optional[pygame.Surface] = None
+
+    ANIMATION_MS = 180
+
+    def __init__(
+        self,
+        name: str,
+        pos_top: int,
+        pos_left: int,
+        page_key: Any,
+        value: int = 0,
+        startup_rotation: int = 0,
+        dependency_actions: Optional[List[DependencyAction]] = None
+    ):
+        super().__init__(
+            name=name,
+            pos_top=pos_top,
+            pos_left=pos_left,
+            page_key=page_key,
+            value=value,
+            width=25,
+            height=43,
+            dependency_actions=dependency_actions
+        )
+        self.startup_rotation = startup_rotation
+        self.art_style = self._choose_art_style(name)
+        self._state_surfaces = self._build_state_surfaces()
+        self.width, self.height = self._state_surfaces[0].get_size()
+
+        # Keep the old sprite centre fixed when switching to differently-sized
+        # artwork. This prevents a new PNG's transparent padding from shifting
+        # the control away from the background switch.
+        if self.startup_rotation % 180 == 90:
+            old_w, old_h = 43, 25
+        else:
+            old_w, old_h = 25, 43
+        center_x = self.pos_left + old_w / 2
+        center_y = self.pos_top + old_h / 2
+        self.draw_left = round(center_x - self.width / 2)
+        self.draw_top = round(center_y - self.height / 2)
+        self.rect = pygame.Rect(self.draw_left, self.draw_top, self.width, self.height)
+
+        self._display_value = int(self.value)
+        self._transition_from: Optional[pygame.Surface] = None
+        self._animation_start_ms = 0
+
+    @staticmethod
+    def _choose_art_style(name: str) -> str:
+        name = name.lower()
+        # The four central channel toggles and the eight round switches on LO01-R.
+        if (
+            "thumbler_1channel" in name or "thumbler_2channel" in name
+            or "thumbler_3channel" in name or "thumbler_4channel" in name
+            or name.startswith("lo01r_reciever_")
+            or name.startswith("lo01r_transmitter_")
+        ):
+            return "small_toggle"
+
+        # Long metal levers on the upper-right and lower-right banks of LO01-P.
+        if any(token in name for token in (
+            "thumbler_power", "thumbler_cold", "thumbler_autosarpp",
+            "thumbler_aircontrol", "thumbler_cooler", "thumbler_light_maintance",
+            "thumbler_light_advanced", "thumbler_light_table",
+        )):
+            return "tall_lever"
+
+        # Red ball levers on the LO01-I generator panel.
+        if name.startswith("lo01i_thumbler_"):
+            return "red_ball"
+
+        # Ivory controls on the lower LO01-P panel and LO01-K modulation panel.
+        if (
+            name.startswith("lo01k_modulation_")
+            or name == "lo01r_antenna_equal"
+            or any(token in name for token in (
+                "thumbler_simulator", "thumbler_antenna_leftside",
+                "thumbler_antenna_rightside", "thumbler_light",
+            ))
+        ):
+            return "ivory"
+
+        return "fallback"
+
+    @staticmethod
+    def _pad_pair(a: pygame.Surface, b: pygame.Surface, anchor: str = "center"):
+        return normalize_pair(a, b, anchor=anchor)
+
+    def _build_state_surfaces(self) -> dict[int, pygame.Surface]:
+        if self.art_style == "small_toggle":
+            base = load_icon("lever_small_toggle.png")
+            if base is not None:
+                # The bezel is round, so a horizontal flip moves the handle to
+                # the other side while keeping the switch base in place.
+                off_img = base
+                on_img = pygame.transform.flip(base, True, False)
+                off_img, on_img = self._pad_pair(off_img, on_img, "center")
+                return {0: off_img, 1: on_img}
+
+        if self.art_style == "tall_lever":
+            off_img = load_icon("lever_tall_white.png", Assets.THUMBLER_OFF)
+            on_img = load_icon("lever_tall_red.png", Assets.THUMBLER_ON)
+            if off_img is not None and on_img is not None:
+                off_img, on_img = self._pad_pair(off_img, on_img, "bottom")
+                return {0: off_img, 1: on_img}
+
+        if self.art_style == "red_ball":
+            base = load_icon("lever_ball_red.png", Assets.THUMBLER_OFF)
+            if base is not None:
+                base = pygame.transform.smoothscale(base, (62, 62))
+                off_img = pygame.transform.rotate(base, -11)
+                on_img = pygame.transform.rotate(base, 11)
+                off_img, on_img = self._pad_pair(off_img, on_img, "center")
+                return {0: off_img, 1: on_img}
+
+        if self.art_style == "ivory":
+            base = load_icon("lever_ivory.png", Assets.THUMBLER_OFF)
+            if base is not None:
+                off_img = pygame.transform.rotate(base, -12)
+                on_img = pygame.transform.rotate(base, 12)
+                off_img, on_img = self._pad_pair(off_img, on_img, "center")
+                return {0: off_img, 1: on_img}
+
+        # Safe fallback when the new assets have not been copied yet.
+        if Thumbler._fallback_on is None or Thumbler._fallback_off is None:
+            raw_on = load_icon("__unused_custom_on.png", Assets.THUMBLER_ON)
+            raw_off = load_icon("__unused_custom_off.png", Assets.THUMBLER_OFF)
+            if raw_on is None or raw_off is None:
+                # Missing old assets as well; fail with a useful, explicit error.
+                raise FileNotFoundError(
+                    "No thumbler sprites found. Copy the seven PNGs to "
+                    "assets/Smalta/Controls/ and keep ThumblerOn.png/ThumblerOff.png as fallback."
+                )
+            Thumbler._fallback_on = pygame.transform.smoothscale(raw_on, (25, 43))
+            Thumbler._fallback_off = pygame.transform.smoothscale(raw_off, (25, 43))
+
+        off_img = Thumbler._fallback_off
+        on_img = Thumbler._fallback_on
+        if self.startup_rotation:
+            off_img = pygame.transform.rotate(off_img, -self.startup_rotation)
+            on_img = pygame.transform.rotate(on_img, -self.startup_rotation)
+        off_img, on_img = self._pad_pair(off_img, on_img, "center")
+        return {0: off_img, 1: on_img}
+
+    def _current_frame(self) -> pygame.Surface:
+        target = self._state_surfaces[int(self._display_value)]
+        if self._transition_from is None:
+            return target.copy()
+        raw = progress_since(self._animation_start_ms, self.ANIMATION_MS)
+        if raw >= 1.0:
+            return target.copy()
+        return blend_surfaces(self._transition_from, target, raw)
+
+    def on_value_changed(self):
+        # Keep an in-flight frame as the start image if the value changes again
+        # before a previous transition has finished.
+        if hasattr(self, "_state_surfaces") and hasattr(self, "_display_value"):
+            self._transition_from = self._current_frame()
+            self._display_value = int(self.value)
+            self._animation_start_ms = pygame.time.get_ticks()
+        super().on_value_changed()
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if not self.is_enabled:
+            return False
+
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                new_val = 1 if self.value == 0 else 0
+                self.set_value(new_val)
+                if self.device and self.device.history_service:
+                    self.device.history_service.record_click(self.name)
+                if self.device and self.device.hint_service:
+                    self.device.hint_service.on_element_interacted(self.name, self.value)
+                return True
+        return False
+
+    def draw(self, surface: pygame.Surface):
+        surface.blit(self._current_frame(), (self.draw_left, self.draw_top))

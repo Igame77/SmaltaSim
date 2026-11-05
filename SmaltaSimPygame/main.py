@@ -1,6 +1,6 @@
 import sys
 import pygame
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from enum import Enum, auto
 
 from pathlib import Path
@@ -118,6 +118,79 @@ class SimulatorApp:
         self.is_fullscreen = not self.is_fullscreen
         pygame.display.toggle_fullscreen()
         self.btn_fullscreen.text = "🗗 В окно" if self.is_fullscreen else "⛶ На весь экран"
+
+
+    def _open_exam_auth_dialog(self):
+        """Open network authentication if it works; don't terminate on setup errors."""
+        dialog_cls = globals().get("StudentAuthDialog")
+        client = getattr(self, "student_client", None)
+        confirm = getattr(self, "_on_auth_confirmed", None)
+        if dialog_cls is not None and client is not None and callable(confirm):
+            try:
+                self.active_dialog = dialog_cls(
+                    on_confirm=confirm,
+                    on_cancel=lambda: setattr(self, "active_dialog", None),
+                    client=client,
+                )
+                return
+            except Exception as exc:
+                print(f"Не удалось открыть сетевой вход в экзамен: {exc}")
+
+        # Local/offline exam fallback: the simulation remains available even
+        # when an optional auth/network component is missing or unavailable.
+        self.mode = ApplicationMode.EXAMINE
+        self.is_network_exam = False
+        if not getattr(self, "student_data", None):
+            self.student_data = {"full_name": "Курсант", "group": "401", "pc_name": "ПК"}
+        if hasattr(self, "_open_device_selection"):
+            self._open_device_selection(ApplicationMode.EXAMINE)
+        else:
+            self.active_dialog = None
+            print("Не найден экран выбора устройства для автономного экзамена.")
+
+    def _open_mode_selection(self, dev_key):
+        self._selected_menu_device = dev_key
+
+        def start_training():
+            self.active_dialog = None
+            self.mode = ApplicationMode.TRAINING
+            self._open_algorithm_selection(dev_key)
+
+        def start_exam():
+            self.active_dialog = None
+            self.mode = ApplicationMode.EXAMINE
+            self._open_exam_auth_dialog()
+
+        device_name = (
+            "ЛО01 «Смальта»"
+            if dev_key == "smalta"
+            else "РЛС ОНЦ"
+        )
+
+        self.active_dialog = ModalDialog(
+            f"{device_name} — режим работы",
+            "Выберите режим работы с выбранным симулятором:",
+            [
+                ("Обучение", start_training, (36, 59, 75)),
+                ("Экзамен", start_exam, (36, 59, 75)),
+                ("Назад", lambda: setattr(self, "active_dialog", None),
+                 (43, 53, 63)),
+            ],
+            width=680,
+            height=280,
+            layout="row"
+        )
+
+    def _on_auth_confirmed(self, student_data, client):
+        self.student_data = student_data
+        self.student_client = client
+        self.active_dialog = None
+
+        if self._selected_menu_device in ("smalta", "rls"):
+            self._open_algorithm_selection(self._selected_menu_device)
+        else:
+            self._open_device_selection(ApplicationMode.EXAMINE)
+
 
     def _show_info_dialog(self):
         msg = (
@@ -545,6 +618,136 @@ class SimulatorApp:
             )
         ]
 
+    def _draw_training_hint_overlay(self):
+        """Draw a precise, readable hint anchored to the active target control."""
+        device = self.active_device
+        if not device or not device.hint_service:
+            return
+
+        service = device.hint_service
+        action = service.get_current_action()
+        if action is None:
+            return
+
+        target = device.get_element_by_name(action.parent_element_name)
+        if target is None:
+            return
+
+        # When the action belongs to another physical panel, show a clear
+        # navigation banner instead of highlighting coordinates from the wrong image.
+        if target.page_key != device.current_page_key:
+            page_value = target.page_key.value if hasattr(target.page_key, "value") else str(target.page_key)
+            label = f"Нужный блок: {page_value}  →"
+            font = pygame.font.SysFont("Arial", 20, bold=True)
+            text_surf = font.render(label, True, (255, 220, 120))
+            box_w = min(max(360, text_surf.get_width() + 48), SCREEN_WIDTH - 32)
+            box_h = 48
+            box = pygame.Rect((SCREEN_WIDTH - box_w) // 2, CANVAS_HEIGHT - box_h - 18, box_w, box_h)
+            panel = pygame.Surface(box.size, pygame.SRCALPHA)
+            pygame.draw.rect(panel, (9, 19, 29, 245), panel.get_rect(), border_radius=9)
+            pygame.draw.rect(panel, (0, 190, 220), panel.get_rect(), width=2, border_radius=9)
+            panel.blit(text_surf, ((box_w - text_surf.get_width()) // 2, (box_h - text_surf.get_height()) // 2))
+            self.screen.blit(panel, box.topleft)
+            return
+
+        # native_rect_to_canvas accounts for the background's exact fitted scale and x offset.
+        if getattr(device, "use_native_coordinates", False) and hasattr(device, "native_rect_to_canvas"):
+            target_rect = device.native_rect_to_canvas(target.rect)
+        else:
+            target_rect = target.rect.copy()
+
+        if target_rect.width <= 0 or target_rect.height <= 0:
+            return
+
+        target_rect = target_rect.clip(pygame.Rect(0, 0, SCREEN_WIDTH, CANVAS_HEIGHT))
+        if target_rect.width <= 0 or target_rect.height <= 0:
+            return
+
+        # Bright target frame with a subtle outer glow.
+        frame = target_rect.inflate(16, 16)
+        pygame.draw.rect(self.screen, (0, 90, 120), frame.inflate(6, 6), width=5, border_radius=9)
+        pygame.draw.rect(self.screen, (0, 220, 245), frame, width=3, border_radius=8)
+
+        badge_text = service.get_hint_level_badge() or "ПОДСКАЗКА"
+        body_text = service.get_current_hint_text() or action.hint_text or "Выполните указанное действие."
+        mistake_text = getattr(service, "last_mistake_text", "")
+
+        badge_font = pygame.font.SysFont("Arial", 12, bold=True)
+        body_font = pygame.font.SysFont("Arial", 16, bold=True)
+        small_font = pygame.font.SysFont("Arial", 13)
+        max_text_width = min(370, SCREEN_WIDTH - 80)
+
+        def wrap(text, font, max_width):
+            words = str(text).split()
+            lines = []
+            current = ""
+            for word in words:
+                candidate = word if not current else current + " " + word
+                if font.size(candidate)[0] <= max_width:
+                    current = candidate
+                else:
+                    if current:
+                        lines.append(current)
+                    current = word
+            if current:
+                lines.append(current)
+            return lines or [""]
+
+        body_lines = wrap(body_text, body_font, max_text_width)[:4]
+        mistake_lines = wrap(mistake_text, small_font, max_text_width)[:2] if mistake_text else []
+        bubble_w = min(max_text_width + 36, SCREEN_WIDTH - 32)
+        bubble_h = 18 + 18 + 8 + len(body_lines) * 21 + (6 + len(mistake_lines) * 17 if mistake_lines else 0) + 16
+
+        # Put the bubble on the side with more room; clamp it away from the top ribbon and navbar.
+        gap = 22
+        if target_rect.centerx < SCREEN_WIDTH // 2:
+            bubble_x = target_rect.right + gap
+            if bubble_x + bubble_w > SCREEN_WIDTH - 12:
+                bubble_x = target_rect.left - bubble_w - gap
+        else:
+            bubble_x = target_rect.left - bubble_w - gap
+            if bubble_x < 12:
+                bubble_x = target_rect.right + gap
+        bubble_x = max(12, min(SCREEN_WIDTH - bubble_w - 12, bubble_x))
+        bubble_y = target_rect.centery - bubble_h // 2
+        bubble_y = max(44, min(CANVAS_HEIGHT - bubble_h - 12, bubble_y))
+        bubble_rect = pygame.Rect(int(bubble_x), int(bubble_y), int(bubble_w), int(bubble_h))
+
+        # Connector from bubble to the actual target frame.
+        if bubble_rect.left >= frame.right:
+            start = (bubble_rect.left, bubble_rect.centery)
+            end = (frame.right, frame.centery)
+        elif bubble_rect.right <= frame.left:
+            start = (bubble_rect.right, bubble_rect.centery)
+            end = (frame.left, frame.centery)
+        elif bubble_rect.top >= frame.bottom:
+            start = (bubble_rect.centerx, bubble_rect.top)
+            end = (frame.centerx, frame.bottom)
+        else:
+            start = (bubble_rect.centerx, bubble_rect.bottom)
+            end = (frame.centerx, frame.top)
+        pygame.draw.line(self.screen, (0, 220, 245), start, end, 3)
+        pygame.draw.circle(self.screen, (240, 255, 255), end, 4)
+
+        bubble = pygame.Surface(bubble_rect.size, pygame.SRCALPHA)
+        pygame.draw.rect(bubble, (8, 17, 27, 246), bubble.get_rect(), border_radius=10)
+        pygame.draw.rect(bubble, (0, 205, 230, 255), bubble.get_rect(), width=2, border_radius=10)
+        badge_surf = badge_font.render(badge_text, True, (100, 225, 245))
+        bubble.blit(badge_surf, (16, 10))
+        text_y = 34
+        for line in body_lines:
+            line_surf = body_font.render(line, True, (245, 249, 252))
+            bubble.blit(line_surf, (16, text_y))
+            text_y += 21
+        if mistake_lines:
+            text_y += 4
+            for line in mistake_lines:
+                line_surf = small_font.render(line, True, (255, 190, 120))
+                bubble.blit(line_surf, (16, text_y))
+                text_y += 17
+        self.screen.blit(bubble, bubble_rect.topleft)
+
+
     def draw_simulation(self):
         # 1. Draw active device canvas (0..800)
         if self.active_device:
@@ -571,9 +774,9 @@ class SimulatorApp:
             # Fullscreen button in simulation
             self.btn_sim_fullscreen.draw(self.screen)
 
-        # 3. Draw Training Hints Overlay
+        # 3. Draw coordinate-correct Training Hints Overlay
         if self.mode == ApplicationMode.TRAINING and self.active_device:
-            self.hint_renderer.draw(self.screen, self.active_device)
+            self._draw_training_hint_overlay()
 
         # 4. Draw Bottom Navbar (800..870)
         nav_rect = pygame.Rect(0, CANVAS_HEIGHT, SCREEN_WIDTH, NAVBAR_HEIGHT)

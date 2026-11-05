@@ -9,6 +9,7 @@ class DeviceBase:
         self.name = name
         self.readable_name = readable_name
         self.pages = pages
+        self.first_page_key = first_page_key
         self.current_page_key = first_page_key
         
         self.elements: List[ElementBase] = []
@@ -30,41 +31,35 @@ class DeviceBase:
     def get_elements_for_page(self, page_key: Any) -> List[ElementBase]:
         return [el for el in self.elements if el.page_key == page_key]
 
-
-
     def set_background(self, page_key: Any, image_path: str):
+        # Backgrounds are always opaque. If a source PNG contains transparency,
+        # composite it onto the same neutral dark matte used outside the image.
+        # This avoids transparent/green RGB fringes after scaling and prevents
+        # the panel from looking like a cut-out over the game window.
         raw = pygame.image.load(str(image_path))
-
+        matte_color = (20, 24, 28)
+        opaque = pygame.Surface(raw.get_size(), depth=24)
+        opaque.fill(matte_color)
+        opaque.blit(raw, (0, 0))
         if pygame.display.get_surface() is not None:
-            raw = raw.convert()
+            opaque = opaque.convert()
+        raw = opaque
 
-        # Сохраняем пропорции изображения, не растягивая приборную панель.
-        canvas_bg = pygame.Surface(
-            (CANVAS_WIDTH, CANVAS_HEIGHT),
-            pygame.SRCALPHA
-        )
-        canvas_bg.fill((18, 24, 29))
+        # Proportional uniform scaling (WPF Stretch="Uniform") to fit CANVAS_WIDTH x CANVAS_HEIGHT
+        orig_w, orig_h = raw.get_size()
+        scale = min(CANVAS_WIDTH / orig_w, CANVAS_HEIGHT / orig_h)
+        scaled_w = int(round(orig_w * scale))
+        scaled_h = int(round(orig_h * scale))
+        scaled_img = pygame.transform.smoothscale(raw, (scaled_w, scaled_h))
 
-        scale = min(
-            CANVAS_WIDTH / raw.get_width(),
-            CANVAS_HEIGHT / raw.get_height()
-        )
-
-        new_width = int(raw.get_width() * scale)
-        new_height = int(raw.get_height() * scale)
-
-        scaled_img = pygame.transform.smoothscale(
-            raw, (new_width, new_height)
-        )
-
-        offset_x = (CANVAS_WIDTH - new_width) // 2
-        offset_y = (CANVAS_HEIGHT - new_height) // 2
-
+        # Center on 1600x800 canvas with dark station chassis background
+        canvas_bg = pygame.Surface((CANVAS_WIDTH, CANVAS_HEIGHT), depth=24)
+        canvas_bg.fill((20, 24, 28))
+        offset_x = (CANVAS_WIDTH - scaled_w) // 2
+        offset_y = (CANVAS_HEIGHT - scaled_h) // 2
         canvas_bg.blit(scaled_img, (offset_x, offset_y))
-
+        
         self.page_backgrounds[page_key] = canvas_bg
-
-
 
     def can_go_forward(self) -> bool:
         idx = self.pages.index(self.current_page_key)
@@ -98,12 +93,15 @@ class DeviceBase:
 
     def apply_algorithm(self, algorithm: Algorithm):
         self.current_algorithm = algorithm
+        self.current_page_key = self.first_page_key
         self.history_service.reset()
         self.hint_service.reset()
 
-        # Cancel any running delayed dependencies
+        # Cancel any running delayed dependencies and reset element interaction states
         for el in self.elements:
             el.cancel_dependencies()
+            el.is_hint_open = False
+            el.is_enabled = True
 
         # Set initial values
         for el in self.elements:
