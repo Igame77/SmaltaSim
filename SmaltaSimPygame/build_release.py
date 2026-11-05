@@ -27,7 +27,16 @@ def clean():
     for spec in BASE_DIR.glob("*.spec"):
         spec.unlink(missing_ok=True)
 
+def check_prerequisites():
+    try:
+        import PIL
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError:
+        print("[!] Pillow (PIL) не найден в текущем Python окружении. Установка...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "Pillow>=10.0.0"], check=True)
+
 def build_exe():
+    check_prerequisites()
     print("--- 1. Сборка onedir сборки для ZIP-архива ---")
     cmd_onedir = [
         sys.executable,
@@ -40,6 +49,7 @@ def build_exe():
         "--add-data", f"{ASSETS_DIR};assets",
         "--collect-all", "pygame",
         "--collect-all", "PIL",
+        "--copy-metadata", "Pillow",
         "--hidden-import", "pygame",
         "--hidden-import", "PIL",
         str(BASE_DIR / "main.py")
@@ -60,6 +70,7 @@ def build_exe():
         "--add-data", f"{ASSETS_DIR};assets",
         "--collect-all", "pygame",
         "--collect-all", "PIL",
+        "--copy-metadata", "Pillow",
         "--hidden-import", "pygame",
         "--hidden-import", "PIL",
         str(BASE_DIR / "main.py")
