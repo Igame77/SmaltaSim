@@ -114,6 +114,16 @@ class HintRenderer:
         card_x = (1600 - card_w) // 2
         card_y = 42
 
+        # Step indicator
+        curr_step = hs.current_action_index + 1
+        total_steps = len(hs.algorithm.actions) if hs.algorithm else 1
+        step_str = f"Шаг {curr_step}/{total_steps}"
+
+        # Right: Escalate Help Button geometry
+        btn_w = 185
+        btn_h = 32
+        self.help_button_rect = pygame.Rect(card_x + card_w - btn_w - 10, card_y + 10, btn_w, btn_h)
+
         # Center: Hint Text or Mistake Alert
         text_avail_w = self.help_button_rect.x - (card_x + 10 + 90 + 8 + 170) - 24
         is_flashing_mistake = (ticks < hs.mistake_flash_until_ms)
@@ -141,11 +151,6 @@ class HintRenderer:
             t_color
         )
         surface.blit(plate_surf, (card_x, card_y))
-
-        # Right: Escalate Help Button
-        btn_w = 185
-        btn_h = 32
-        self.help_button_rect = pygame.Rect(card_x + card_w - btn_w - 10, card_y + 10, btn_w, btn_h)
 
         if btn_active:
             btn_bg = (40, 60, 80) if not self.is_help_hovered else (55, 85, 115)
