@@ -22,6 +22,7 @@ from ui.student_auth_dialog import StudentAuthDialog, WaitingForTeacherDialog
 from network.student_client import StudentClient
 from network.action_annotator import ActionAnnotator
 from network.exam_protocol import EventType, StudentStatus
+from core.vsp_manager import VspManager
 
 class AppState(Enum):
     MAIN_MENU = auto()
@@ -77,6 +78,7 @@ class SimulatorApp:
         self.nav_font = pygame.font.SysFont(font_families, 15, bold=True)
         self.badge_font = pygame.font.SysFont(font_families, 13, bold=True)
         self.header_font = pygame.font.SysFont(font_families, 14, bold=True)
+        self.small_font = pygame.font.SysFont(font_families, 12)
 
         # TrollFace Easter egg
         self.troll_face_img = pygame.image.load(str(Assets.TROLL_FACE)).convert_alpha()
@@ -111,6 +113,7 @@ class SimulatorApp:
             "smalta": get_smalta_algorithms(),
             "rls": get_rls_algorithms(),
         }
+        self.vsp_manager = VspManager()
 
         # UI Elements
         self._build_main_menu_buttons()
@@ -139,23 +142,10 @@ class SimulatorApp:
     def _build_main_menu_buttons(self):
         header_w = 1000
         header_x = (SCREEN_WIDTH - header_w) // 2
-        btn_w, btn_h = 470, 78
+        btn_w, btn_h = 470, 68
         btn_x = header_x
-        btn_y = 230
-        gap = 18
-
-        def load_btn_plates(norm_path, hov_path):
-            try:
-                norm_img = pygame.image.load(str(norm_path)).convert_alpha()
-                hov_img = pygame.image.load(str(hov_path)).convert_alpha()
-                return norm_img, hov_img
-            except Exception:
-                return None, None
-
-        img_train_n, img_train_h = load_btn_plates(Assets.UI_BTN_TRAINING_NORM, Assets.UI_BTN_TRAINING_HOV)
-        img_exam_n, img_exam_h = load_btn_plates(Assets.UI_BTN_EXAM_NORM, Assets.UI_BTN_EXAM_HOV)
-        img_info_n, img_info_h = load_btn_plates(Assets.UI_BTN_INFO_NORM, Assets.UI_BTN_INFO_HOV)
-        img_exit_n, img_exit_h = load_btn_plates(Assets.UI_BTN_EXIT_NORM, Assets.UI_BTN_EXIT_HOV)
+        btn_y = 215
+        gap = 12
 
         self.menu_buttons = [
             MenuCardButton(
@@ -164,9 +154,7 @@ class SimulatorApp:
                 subtitle="Пошаговый тренажер с подсказками по органам управления",
                 callback=lambda: self._open_device_selection(ApplicationMode.TRAINING),
                 accent_color=(14, 165, 233),
-                border_radius=8,
-                img_normal=img_train_n,
-                img_hover=img_train_h
+                border_radius=8
             ),
             MenuCardButton(
                 pygame.Rect(btn_x, btn_y + (btn_h + gap), btn_w, btn_h),
@@ -174,29 +162,31 @@ class SimulatorApp:
                 subtitle="Сдача практического норматива и сетевой аудит",
                 callback=self._open_exam_auth_dialog,
                 accent_color=(245, 158, 11),
-                border_radius=8,
-                img_normal=img_exam_n,
-                img_hover=img_exam_h
+                border_radius=8
             ),
             MenuCardButton(
                 pygame.Rect(btn_x, btn_y + 2 * (btn_h + gap), btn_w, btn_h),
+                title="ТЕСТЫ ЗНАНИЙ",
+                subtitle="База тестов и нормативов дисциплин ВСП.01, ВСП.02, ВСП.03",
+                callback=self._open_test_selection,
+                accent_color=(16, 185, 129),
+                border_radius=8
+            ),
+            MenuCardButton(
+                pygame.Rect(btn_x, btn_y + 3 * (btn_h + gap), btn_w, btn_h),
                 title="ИНФОРМАЦИЯ",
                 subtitle="Методическое описание станций и регламентов работы",
                 callback=self._show_info_dialog,
                 accent_color=(99, 102, 241),
-                border_radius=8,
-                img_normal=img_info_n,
-                img_hover=img_info_h
+                border_radius=8
             ),
             MenuCardButton(
-                pygame.Rect(btn_x, btn_y + 3 * (btn_h + gap), btn_w, btn_h),
+                pygame.Rect(btn_x, btn_y + 4 * (btn_h + gap), btn_w, btn_h),
                 title="ВЫХОД",
                 subtitle="Завершение работы программы",
                 callback=self.quit,
                 accent_color=(239, 68, 68),
-                border_radius=8,
-                img_normal=img_exit_n,
-                img_hover=img_exit_h
+                border_radius=8
             )
         ]
 
@@ -216,41 +206,155 @@ class SimulatorApp:
     def _show_info_dialog(self):
         msg = (
             "Vkm.ComplexSim — Комплексный симулятор устройств РЭБ и РЛС\n\n"
-            "Программа предназначена для обучения и проверки знаний курсантов\n"
-            "по приборам и комплексам радиоэлектронной борьбы и радиолокации:\n"
-            "  * Станция активных помех ЛО01 'Смальта' (блоки П, Р, И, К)\n"
-            "  * Импульсная РЛС ОНЦ (пульты управления, круговой радар, генератор Г5-15, осциллограф С1-65)\n\n"
-            "В режиме 'Обучение' работает адаптивная 3-уровневая система подсказок:\n"
-            "  1) Общая задача/цель действия без прямой подсказки\n"
-            "  2) При неверном действии подсказка уточняется (блок/тип органа)\n"
-            "  3) Если действие вызывает затруднения — переход к прямой подсветке и указанию стрелкой.\n"
-            "Горячие клавиши: F1 — уточнить подсказку, Пробел — следующий шаг в инфо-подсказках, F11 — полный экран."
+            "Единый программный комплекс обучения и проверки знаний курсантов\n"
+            "по приборам, станциям и регламентам радиоэлектронной борьбы и разведки:\n"
+            "  * Встроенные тренажеры: ЛО01 «Смальта» (блоки П, Р, И, К), РЛС ОНЦ (радар, Г5-15, С1-65)\n"
+            "  * Подключенные симуляторы: СПС-5М «Фасоль», «Сорбция-С» (МРМ-70), «Азалия», СПО-15 «Береза»\n"
+            "  * Интерактивная база из 27 тестов по дисциплинам ВСП.01, ВСП.02, ВСП.03\n\n"
+            "Режимы работы:\n"
+            "  1) Обучение: 3-уровневые адаптивные подсказки (цель -> уточнение -> прямая подсветка F1)\n"
+            "  2) Экзамен: практическая сдача норматива, сетевой аудит действий и передача на пульт преподавателя\n"
+            "  3) Тесты знаний: сдача контрольных и зачетных тестов по всем станциям и практическим занятиям.\n\n"
+            "Горячие клавиши: F1 / H — подсказка, Пробел — далее на инфо-шагах, F11 — полноэкранный режим."
         )
         self.active_dialog = ModalDialog(
-            "О программе",
+            "О программном комплексе",
             msg,
             [("Закрыть", lambda: setattr(self, 'active_dialog', None), (60, 75, 90))],
-            width=720,
-            height=410,
+            width=780,
+            height=430,
             layout="row"
         )
 
     def _open_device_selection(self, mode: ApplicationMode):
         self.mode = mode
-        def choose(dev_key: str):
+
+        def choose_builtin(dev_key: str):
             self.active_dialog = None
             self._open_algorithm_selection(dev_key)
 
+        def choose_external(sim_id: str):
+            self.active_dialog = None
+            self._show_external_sim_dialog(sim_id, mode)
+
         buttons = [
-            ("ЛО01 Смальта", lambda: choose("smalta"), (35, 110, 160)),
-            ("РЛС ОНЦ", lambda: choose("rls"), (30, 130, 90)),
+            ("ЛО01 «Смальта» (Встроенный)", lambda: choose_builtin("smalta"), (14, 165, 233)),
+            ("РЛС ОНЦ (Встроенный)", lambda: choose_builtin("rls"), (56, 189, 248)),
+            ("СПС-5М «Фасоль» (ВСП.02)", lambda: choose_external("fasol"), (234, 88, 12)),
+            ("«Сорбция-С» МРМ-70 (ВСП.02/03)", lambda: choose_external("sorbtia"), (16, 185, 129)),
+            ("Станция «Азалия» (ВСП.03)", lambda: choose_external("azalia"), (168, 85, 247)),
+            ("СПО-15 «Береза» (ВСП.01/03)", lambda: choose_external("bereza"), (236, 72, 153)),
             ("Отмена", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)),
         ]
         self.active_dialog = ModalDialog(
             f"Выбор изделия ({mode.value})",
-            "Выберите станцию или приборный комплекс для работы:",
+            "Выберите станцию радиоэлектронной борьбы или радиолокации для работы:",
             buttons,
-            width=620,
+            width=880,
+            height=320,
+            layout="grid"
+        )
+
+    def _show_external_sim_dialog(self, sim_id: str, mode: ApplicationMode):
+        sim = self.vsp_manager.simulators.get(sim_id)
+        if not sim:
+            return
+
+        def launch_sim():
+            self.active_dialog = None
+            ok, msg = self.vsp_manager.launch_simulator(sim_id)
+            self._show_notification_dialog(sim["name"], msg)
+
+        def launch_test():
+            self.active_dialog = None
+            ok, msg = self.vsp_manager.launch_test(sim["linked_test"])
+            self._show_notification_dialog(f"Тест: {sim['name']}", msg)
+
+        def back_to_selection():
+            self.active_dialog = None
+            self._open_device_selection(mode)
+
+        reg_text = "\n".join([f"  • {r}" for r in sim["regulations"]])
+        msg = f"{sim['desc']}\n\nОтрабатываемые регламенты и упражнения:\n{reg_text}"
+
+        buttons = [
+            ("▶ Запустить симулятор", launch_sim, (30, 140, 80)),
+            ("📝 Пройти тест по станции", launch_test, (35, 110, 160)),
+            ("← Назад к выбору", back_to_selection, (75, 80, 85)),
+        ]
+
+        self.active_dialog = ModalDialog(
+            f"{sim['full_name']} [{sim['badge']}]",
+            msg,
+            buttons,
+            width=860,
+            height=430,
+            layout="row"
+        )
+
+    def _open_test_selection(self):
+        def open_category(cat_key: str):
+            self.active_dialog = None
+            self._open_category_tests(cat_key)
+
+        buttons = [
+            ("ВСП.01: Радиотехническая разведка и контроль (7 тестов)", lambda: open_category("vsp01"), (14, 165, 233)),
+            ("ВСП.02: Станции помех и радиоэлектронное подавление (11 тестов)", lambda: open_category("vsp02"), (245, 158, 11)),
+            ("ВСП.03: Регламентные работы и подготовка к полетам (9 тестов)", lambda: open_category("vsp03"), (16, 185, 129)),
+            ("Закрыть", lambda: setattr(self, 'active_dialog', None), (75, 80, 85)),
+        ]
+
+        msg = (
+            "Единая база интерактивных тестов по учебным дисциплинам ВСП.01, ВСП.02 и ВСП.03.\n"
+            "Всего доступно 27 специализированных тестов по станциям, приборам и регламентам.\n"
+            "Выберите интересующую дисциплину для перехода к списку доступных тестов:"
+        )
+
+        self.active_dialog = ModalDialog(
+            "Тесты знаний и практических нормативов",
+            msg,
+            buttons,
+            width=820,
+            height=370,
+            layout="list"
+        )
+
+    def _open_category_tests(self, cat_key: str):
+        cat_data = self.vsp_manager.tests_by_discipline.get(cat_key)
+        if not cat_data:
+            return
+
+        buttons = []
+        for t in cat_data["items"]:
+            title = t["title"]
+            rel = t["rel"]
+            def make_cb(target_rel=rel, test_title=title):
+                def cb():
+                    self.active_dialog = None
+                    ok, msg = self.vsp_manager.launch_test(target_rel)
+                    self._show_notification_dialog(test_title, msg)
+                return cb
+            buttons.append((title, make_cb(), (30, 41, 59)))
+
+        buttons.append(("← Назад к списку дисциплин", self._open_test_selection, (75, 80, 85)))
+
+        msg = f"{cat_data['desc']}\nВыберите тест для запуска (открывается в интерактивном окне тестирования):"
+
+        self.active_dialog = ModalDialog(
+            cat_data["title"],
+            msg,
+            buttons,
+            width=920,
+            height=440,
+            layout="grid"
+        )
+
+    def _show_notification_dialog(self, title: str, message: str):
+        self.active_dialog = ModalDialog(
+            title,
+            message,
+            [("Понятно", lambda: setattr(self, 'active_dialog', None), (35, 110, 160))],
+            width=640,
             height=250,
             layout="row"
         )
@@ -842,48 +946,56 @@ class SimulatorApp:
             b.draw(self.screen)
 
         # Right Column: Overview Panel
-        btn_w, btn_h = 470, 78
-        gap = 18
+        btn_w, btn_h = 470, 68
+        gap = 12
         panel_x = header_x + btn_w + 30
-        panel_y = 230
+        panel_y = 215
         panel_w = header_w - btn_w - 30
-        panel_h = (btn_h + gap) * 4 - gap
+        panel_h = (btn_h + gap) * 5 - gap
 
-        if self.devices_panel_plate:
-            self.screen.blit(self.devices_panel_plate, (panel_x, panel_y))
-        else:
-            panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-            panel_surf.fill((15, 23, 42, 220))
-            pygame.draw.rect(panel_surf, (30, 41, 59), (0, 0, panel_w, panel_h), width=1, border_radius=10)
+        panel_surf = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel_surf.fill((15, 23, 42, 225))
+        pygame.draw.rect(panel_surf, (30, 41, 59), (0, 0, panel_w, panel_h), width=1, border_radius=10)
 
-            p_title = self.subtitle_font.render("Доступные изделия тренажера", True, (241, 245, 249))
-            panel_surf.blit(p_title, (25, 20))
+        p_title = self.subtitle_font.render("Доступные станции и учебные комплексы", True, (241, 245, 249))
+        panel_surf.blit(p_title, (20, 12))
 
-            devs = [
-                ("Станция помех ЛО01 «Смальта»",
-                 "Вертолетная станция активных помех РЭБ.\nПульты ЛО01-П, передатчик ЛО01-Р, блок ЛО01-И/К.",
-                 (14, 165, 233)),
-                ("РЛС ОНЦ",
-                 "Радиолокационная станция обнаружения надводных целей.\nГенератор Г5-15, осциллограф С1-65, радарный экран.",
-                 (56, 189, 248)),
-            ]
+        devs = [
+            ("Станция помех ЛО01 «Смальта»", "Блоки ЛО01-П, ЛО01-Р, ЛО01-И/К • Встроенный тренажер", (14, 165, 233), "[ВСП.02/03]"),
+            ("Импульсная РЛС ОНЦ", "Пульты РЛС, имитатор, Г5-15, С1-65 • Встроенный радар", (56, 189, 248), "[ВСП.01]"),
+            ("СПС-5М «Фасоль»", "Станция активных помех см-диапазона • Блок Б2, осциллограф", (234, 88, 12), "[ВСП.02]"),
+            ("«Сорбция-С» (МРМ-70)", "Комплекс помех Су-27/30 • Измерители Г4/Г5, блоки СВК и КПА", (16, 185, 129), "[ВСП.02/03]"),
+            ("Станции «Азалия» & СПО-15 «Береза»", "Групповая защита бомбардировщиков и станция разведки РТР", (168, 85, 247), "[ВСП.01/03]"),
+        ]
 
-            for didx, (dname, ddesc, dcol) in enumerate(devs):
-                dy = 65 + didx * 140
-                dcard = pygame.Surface((panel_w - 50, 120), pygame.SRCALPHA)
-                dcard.fill((10, 15, 28, 180))
-                pygame.draw.rect(dcard, (30, 41, 59), (0, 0, panel_w - 50, 120), width=1, border_radius=6)
-                pygame.draw.rect(dcard, dcol, (0, 0, 4, 120), border_top_left_radius=6, border_bottom_left_radius=6)
+        card_h = 51
+        for didx, (dname, ddesc, dcol, dbadge) in enumerate(devs):
+            dy = 42 + didx * 57
+            dcard = pygame.Surface((panel_w - 36, card_h), pygame.SRCALPHA)
+            dcard.fill((10, 15, 28, 195))
+            pygame.draw.rect(dcard, (30, 41, 59), (0, 0, panel_w - 36, card_h), width=1, border_radius=6)
+            pygame.draw.rect(dcard, dcol, (0, 0, 4, card_h), border_top_left_radius=6, border_bottom_left_radius=6)
 
-                dt = self.nav_font.render(dname, True, (241, 245, 249))
-                dcard.blit(dt, (18, 12))
+            dt = self.header_font.render(dname, True, (241, 245, 249))
+            dcard.blit(dt, (14, 6))
 
-                for l_idx, line in enumerate(ddesc.split("\n")):
-                    dcard.blit(self.header_desc_font.render(line, True, (148, 163, 184)), (18, 42 + l_idx * 22))
+            badge_surf = self.badge_font.render(dbadge, True, dcol)
+            dcard.blit(badge_surf, (panel_w - 36 - badge_surf.get_width() - 10, 7))
 
-                panel_surf.blit(dcard, (25, dy))
+            dd = self.small_font.render(ddesc, True, (148, 163, 184))
+            dcard.blit(dd, (14, 28))
 
-            self.screen.blit(panel_surf, (panel_x, panel_y))
+            panel_surf.blit(dcard, (18, dy))
+
+        # Bottom status pill in panel
+        foot_y = panel_h - 38
+        foot_w = panel_w - 36
+        pygame.draw.rect(panel_surf, (18, 30, 45), (18, foot_y, foot_w, 28), border_radius=5)
+        pygame.draw.rect(panel_surf, (40, 60, 85), (18, foot_y, foot_w, 28), width=1, border_radius=5)
+        foot_txt = self.small_font.render("✓ Подключено 27 интерактивных тестов дисциплин ВСП.01, ВСП.02, ВСП.03", True, (52, 211, 153))
+        panel_surf.blit(foot_txt, (18 + (foot_w - foot_txt.get_width()) // 2, foot_y + 6))
+
+        self.screen.blit(panel_surf, (panel_x, panel_y))
 
         # Fullscreen button in menu
         self.btn_fullscreen.draw(self.screen)

@@ -211,9 +211,12 @@ class ModalDialog:
             if curr_line:
                 self.formatted_lines.append(curr_line)
 
-        # Decide layout: "list" (vertical stacked) or "row" (horizontal)
+        # Decide layout: "list" (vertical stacked), "row" (horizontal), or "grid" (2-column grid)
+        is_grid = (layout == "grid")
         if layout == "auto":
             is_list = len(buttons) > 2 or any(len(b[0]) > 14 for b in buttons)
+        elif layout == "grid":
+            is_list = False
         else:
             is_list = (layout == "list")
 
@@ -222,15 +225,22 @@ class ModalDialog:
         line_spacing = 22
         body_h = len(self.formatted_lines) * line_spacing + 20
         
-        btn_h = 42
-        if is_list:
+        if is_grid:
+            btn_h = 38
+            num_rows = (len(buttons) + 1) // 2
+            buttons_h = num_rows * (btn_h + 8) + 12
+            self.width = max(width, 860)
+        elif is_list:
+            btn_h = 42
             buttons_h = len(buttons) * (btn_h + 10) + 10
+            self.width = max(width, 540)
         else:
+            btn_h = 42
             buttons_h = btn_h + 20
+            self.width = max(width, 480)
 
         min_needed_h = header_h + body_h + buttons_h + 20
         self.height = max(height, min_needed_h)
-        self.width = max(width, 540 if is_list else 480)
 
         # Center in screen (1600x870)
         self.x = (1600 - self.width) // 2
@@ -240,7 +250,33 @@ class ModalDialog:
 
         # Position buttons
         self.ui_buttons: List[UIButton] = []
-        if is_list:
+        if is_grid:
+            gap_x = 14
+            gap_y = 8
+            btn_w = (self.width - 60 - gap_x) // 2
+            curr_by = self.y + header_h + body_h
+            num_btns = len(buttons)
+            for i, (text, cb, color) in enumerate(buttons):
+                if i == num_btns - 1 and num_btns % 2 == 1:
+                    bx = self.x + 30
+                    bw = self.width - 60
+                    by = curr_by + (i // 2) * (btn_h + gap_y)
+                else:
+                    col = i % 2
+                    row = i // 2
+                    bx = self.x + 30 + col * (btn_w + gap_x)
+                    by = curr_by + row * (btn_h + gap_y)
+                    bw = btn_w
+                b = UIButton(
+                    pygame.Rect(bx, by, bw, btn_h),
+                    text,
+                    callback=cb,
+                    font_size=13,
+                    bg_color=color,
+                    border_radius=6
+                )
+                self.ui_buttons.append(b)
+        elif is_list:
             # Vertical stacked buttons
             btn_w = self.width - 60
             curr_by = self.y + header_h + body_h
